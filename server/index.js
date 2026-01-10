@@ -69,7 +69,7 @@ app.get("/users", async (req, res) => {
   }
 });
 
-// 4. GET ALL MESSAGES FOR A USER (New! For Sidebar Previews)
+// 4. GET ALL MESSAGES FOR A USER
 app.get("/messages/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -82,12 +82,43 @@ app.get("/messages/:userId", async (req, res) => {
   }
 });
 
+// 5. TOGGLE SAVE MESSAGE (Fix for Saving/Unsaving)
+app.put("/messages/toggle/:messageId", async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const msg = await Message.findById(messageId);
+    
+    if (!msg) return res.status(404).json("Message not found");
+
+    if (msg.isSaved) {
+      // UNSAVE: Restore the 48h timer based on creation time
+      const expirationDate = new Date(msg.createdAt);
+      expirationDate.setHours(expirationDate.getHours() + 48);
+      
+      await Message.findByIdAndUpdate(messageId, { 
+        isSaved: false, 
+        expireAt: expirationDate 
+      });
+      res.status(200).json({ isSaved: false });
+    } else {
+      // SAVE: Remove the timer
+      await Message.findByIdAndUpdate(messageId, { 
+        isSaved: true, 
+        $unset: { expireAt: 1 } 
+      });
+      res.status(200).json({ isSaved: true });
+    }
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
 // --- SOCKET SERVER ---
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"],
+    origin: "*", // Allow connections from anywhere (useful for deployment)
+    methods: ["GET", "POST", "PUT"],
   },
 });
 
@@ -111,7 +142,7 @@ io.on("connection", (socket) => {
       
       const user = onlineUsers.find((user) => user.userId === recipientId);
       if (user) {
-        io.to(user.socketId).emit("getMessage", message);
+        io.to(user.socketId).emit("getMessage", newMessage); // Send full DB object (with _id)
       }
     } catch (error) {
       console.log(error);

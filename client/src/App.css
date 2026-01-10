@@ -285,3 +285,41 @@ body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
   background: #ffebee; color: #c62828; padding: 10px;
   border-radius: 5px; margin-bottom: 15px; font-size: 14px;
 }
+
+/* Add this to your App.css */
+
+.security-bar {
+  display: flex;
+  align-items: center;
+  background: #ffebee; /* Light red when unlocked */
+  padding: 8px 15px;
+  border-bottom: 1px solid #ffcdd2;
+  transition: all 0.3s;
+}
+
+.security-bar.locked {
+  background: #e8f5e9; /* Light green when locked */
+  border-color: #c8e6c9;
+}
+
+.security-bar input {
+  border: none;
+  background: transparent;
+  flex: 1;
+  margin: 0 10px;
+  outline: none;
+  font-size: 13px;
+  color: #333;
+}
+
+.security-bar button {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.lock-icon { color: #4caf50; }
+.unlock-icon { color: #f44336; }
