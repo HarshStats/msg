@@ -3,12 +3,58 @@ import { io } from "socket.io-client";
 import { 
   FiSearch, FiPaperclip, FiSend, FiMoreVertical, 
   FiArrowLeft, FiUserPlus, FiCopy,
-  FiTrash2, FiCornerUpRight, FiX, FiShield 
+  FiTrash2, FiCornerUpRight, FiX, FiShield, FiImage, FiDownload, FiAlertTriangle 
 } from "react-icons/fi"; 
 import { BsCheck2All, BsBookmarkStarFill, BsCircle, BsCheckCircleFill } from "react-icons/bs"; 
 import Login from "./Login"; 
 import { deriveSharedKey, encryptText, decryptText } from "./crypto"; 
 import "./App.css";
+
+// SOUND
+const playNotificationSound = () => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return; 
+    const ctx = new AudioContext();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.type = "sine"; 
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime); 
+    oscillator.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 1.5);
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime); 
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5); 
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 1.5); 
+  } catch (err) { console.error("Audio play failed:", err); }
+};
+
+// COMPRESSION
+const compressImage = (file, quality = 0.7, maxWidth = 1000) => {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                let width = img.width;
+                let height = img.height;
+                if (width > maxWidth) {
+                    height = Math.round((height * maxWidth) / width);
+                    width = maxWidth;
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL("image/jpeg", quality));
+            };
+        };
+    });
+};
 
 function App() {
   const [myId, setMyId] = useState(() => localStorage.getItem("chat_username"));
@@ -29,21 +75,22 @@ function App() {
 const ChatInterface = ({ myId, onLogout }) => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  
   const [onlineUsers, setOnlineUsers] = useState([]); 
   const [contacts, setContacts] = useState([]); 
   const [messages, setMessages] = useState([]); 
-  
   const [selectedUser, setSelectedUser] = useState(null);
   const [currentMessage, setCurrentMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [notifications, setNotifications] = useState([]);
   
-  // STATE FOR SELECT / DELETE / FORWARD
+  // States
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMsgIds, setSelectedMsgIds] = useState([]);
   const [isForwarding, setIsForwarding] = useState(false); 
-  
+  const [viewingImage, setViewingImage] = useState(null);
+  const [nukeCount, setNukeCount] = useState(0); 
+  const [theme, setTheme] = useState("dark");
+
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendCodeInput, setFriendCodeInput] = useState("");
   const myFriendCode = localStorage.getItem("my_friend_code") || "Loading...";
@@ -52,10 +99,23 @@ const ChatInterface = ({ myId, onLogout }) => {
   const sharedKeysCache = useRef({}); 
   const scrollRef = useRef();
   const selectedUserRef = useRef(null);
+  const fileInputRef = useRef(null); 
 
-  useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
+  useEffect(() => { selectedUserRef.current = selectedUser; setNukeCount(0); }, [selectedUser]);
   
-  // 1. DATA FETCHING
+  const toggleTheme = () => {
+      setTheme(prev => prev === "dark" ? "light" : "dark");
+  };
+
+  // --- NEW: DYNAMIC AVATAR HELPER ---
+  const getAvatar = (seed) => {
+      // If Dark Mode: Dark Blue Background, Neon Cyan Text
+      // If Light Mode: Very Light Cyan Background, Dark Teal Text
+      const bg = theme === 'dark' ? '003344' : 'e0f7fa';
+      const text = theme === 'dark' ? '00bcd4' : '006064';
+      return `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=${bg}&textColor=${text}&fontWeight=700`;
+  };
+
   const fetchContacts = async () => {
       try {
         const res = await fetch(`http://localhost:3000/contacts/${myId}`);
@@ -76,53 +136,63 @@ const ChatInterface = ({ myId, onLogout }) => {
     fetchMsgs();
   }, [myId]);
 
-  // 2. SOCKET
   useEffect(() => {
     const newSocket = io("http://localhost:3000");
     setSocket(newSocket);
     newSocket.on("connect", () => { setIsConnected(true); newSocket.emit("addNewUser", myId); });
     newSocket.on("disconnect", () => setIsConnected(false));
     newSocket.on("getOnlineUsers", (users) => setOnlineUsers(users));
+    
     newSocket.on("getMessage", (message) => {
       setMessages((prev) => [...prev, message]);
+      if (message.senderId !== myId) playNotificationSound(); 
       if (selectedUserRef.current?.username !== message.senderId) {
         setNotifications((prev) => [message, ...prev]);
       }
     });
+
+    newSocket.on("chatNuked", ({ target }) => {
+        if (target === myId || target === selectedUserRef.current?.username) {
+            setMessages(prev => prev.filter(m => m.isSaved));
+        }
+    });
+
     return () => newSocket.disconnect();
   }, [myId]);
 
-  // 3. CRYPTO HELPERS
   const getSharedKey = async (otherUser) => {
       if (!otherUser) return null;
       if (sharedKeysCache.current[otherUser.username]) return sharedKeysCache.current[otherUser.username];
-
       const myPrivKeyJwk = JSON.parse(localStorage.getItem(`priv_${myId}`));
       if (!myPrivKeyJwk || !otherUser.publicKey) return null;
-
       const key = await deriveSharedKey(myPrivKeyJwk, otherUser.publicKey);
       sharedKeysCache.current[otherUser.username] = key;
       return key;
   };
 
-  // 4. ACTION HANDLERS
-  const handleSend = async (textToSend = currentMessage, recipient = selectedUser) => {
-    if (!textToSend?.trim() || !recipient) return;
-    
+  const handleSend = async (content = currentMessage, type = "text", recipient = selectedUser) => {
+    if (!content || (typeof content === 'string' && !content.trim()) || !recipient) return;
     const sharedKey = await getSharedKey(recipient);
-    let finalPayload = textToSend;
-    if (sharedKey) {
-        finalPayload = await encryptText(sharedKey, textToSend);
-    }
-    
+    let finalPayload = content;
+    if (sharedKey) finalPayload = await encryptText(sharedKey, content);
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const messageData = {
-      senderId: myId, recipientId: recipient.username, text: finalPayload, time: time,
-    };
-    
+    const messageData = { senderId: myId, recipientId: recipient.username, text: finalPayload, type: type, time: time };
     socket.emit("sendMessage", messageData);
     setMessages((prev) => [...prev, messageData]); 
-    if(recipient === selectedUser) setCurrentMessage("");
+    if(recipient === selectedUser && type === "text") setCurrentMessage("");
+  };
+
+  const handleFileClick = () => fileInputRef.current.click();
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { alert("File too large. Max 10MB."); return; }
+    try {
+        const compressedBase64 = await compressImage(file);
+        await handleSend(compressedBase64, "image");
+    } catch (err) { console.error("Compression failed", err); }
+    e.target.value = null; 
   };
 
   const handleAddFriend = async () => {
@@ -136,19 +206,29 @@ const ChatInterface = ({ myId, onLogout }) => {
       } catch(err) { alert("Error adding friend"); }
   };
 
-  const toggleSelectionMode = () => {
-      setIsSelectionMode(!isSelectionMode);
-      setSelectedMsgIds([]);
-      setIsForwarding(false);
+  const handleNuke = async () => {
+      if (nukeCount < 2) {
+          setNukeCount(prev => prev + 1);
+          setTimeout(() => setNukeCount(0), 3000); 
+      } else {
+          try {
+              await fetch("http://localhost:3000/messages/nuke", {
+                  method: "DELETE", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ myId, otherId: selectedUser.username })
+              });
+              setMessages(prev => prev.filter(m => m.isSaved));
+              setNukeCount(0);
+              alert("💥 CHAT NUKED 💥");
+          } catch(err) { console.error("Nuke failed", err); }
+      }
   };
+
+  const toggleSelectionMode = () => { setIsSelectionMode(!isSelectionMode); setSelectedMsgIds([]); setIsForwarding(false); };
 
   const handleMessageClick = async (msg) => {
       if (isSelectionMode) {
-          if (selectedMsgIds.includes(msg._id)) {
-              setSelectedMsgIds(prev => prev.filter(id => id !== msg._id));
-          } else {
-              setSelectedMsgIds(prev => [...prev, msg._id]);
-          }
+          if (selectedMsgIds.includes(msg._id)) setSelectedMsgIds(prev => prev.filter(id => id !== msg._id));
+          else setSelectedMsgIds(prev => [...prev, msg._id]);
           return;
       }
       if(msg._id) {
@@ -165,27 +245,21 @@ const ChatInterface = ({ myId, onLogout }) => {
               body: JSON.stringify({ ids: selectedMsgIds })
           });
           setMessages(prev => prev.filter(m => !selectedMsgIds.includes(m._id)));
-          setIsSelectionMode(false);
-          setSelectedMsgIds([]);
+          setIsSelectionMode(false); setSelectedMsgIds([]);
       } catch(e) { console.error("Delete failed", e); }
   };
 
-  const initForwarding = () => {
-      setIsForwarding(true); 
-      alert("Select a contact to forward to");
-  };
+  const initForwarding = () => { setIsForwarding(true); alert("Select a contact to forward to"); };
 
   const handleUserClick = async (user) => {
       if (isForwarding) {
           if(!window.confirm(`Forward ${selectedMsgIds.length} messages to ${user.username}?`)) return;
           for (let msgId of selectedMsgIds) {
               const rawText = decryptedCache[msgId]; 
-              if (rawText) await handleSend(rawText, user);
+              const originalMsg = messages.find(m => m._id === msgId);
+              if (rawText && originalMsg) await handleSend(rawText, originalMsg.type || "text", user);
           }
-          setIsForwarding(false);
-          setIsSelectionMode(false);
-          setSelectedMsgIds([]);
-          setSelectedUser(user); 
+          setIsForwarding(false); setIsSelectionMode(false); setSelectedMsgIds([]); setSelectedUser(user); 
           return;
       }
       setSelectedUser(user);
@@ -193,7 +267,6 @@ const ChatInterface = ({ myId, onLogout }) => {
       setIsSelectionMode(false); 
   };
 
-  // 5. DECRYPTION
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
@@ -223,70 +296,61 @@ const ChatInterface = ({ myId, onLogout }) => {
       (msg.senderId === selectedUser?.username && msg.recipientId === myId)
   );
   
-  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [currentChatMessages, decryptedCache]);
+  useEffect(() => { 
+      if (!isSelectionMode) scrollRef.current?.scrollIntoView({ behavior: "smooth" }); 
+  }, [currentChatMessages.length, selectedUser?.username, isSelectionMode]);
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${theme === "light" ? "light-theme" : ""}`}>
       {/* SIDEBAR */}
       <div className={`sidebar ${selectedUser ? "mobile-hidden" : ""}`}>
+        
         <div className="sidebar-header">
-          
-          {/* --- SIDEBAR LOGO --- */}
-          <div className="brand-header">
+          <div className="brand-container" onClick={toggleTheme} style={{cursor: "pointer"}} title="Toggle Theme">
             <h1 className="logo-text">MSG</h1>
             <p className="logo-tagline">Secure. Ephemeral. Private.</p>
           </div>
-          {/* -------------------- */}
+          <div className="mini-profile">
+             <div className="avatar mini-avatar">
+                {/* Updated: Use dynamic getAvatar */}
+                <img src={getAvatar(myId)} alt="Me" />
+             </div>
+             <span className="online-dot mini-status"></span>
+          </div>
+        </div>
 
-          {isForwarding ? (
+        {isForwarding ? (
              <div className="forward-header">
                 <h3>Select Recipient</h3>
                 <button onClick={() => {setIsForwarding(false); setIsSelectionMode(false)}}>Cancel</button>
              </div>
-          ) : (
-            <>
-            <div className="my-profile">
-                <div className="avatar">
-                <img 
-                    src={`https://api.dicebear.com/7.x/initials/svg?seed=${myId}&backgroundColor=003344&textColor=00bcd4&fontWeight=700`} 
-                    alt="avatar" 
-                />
-                <span className="online-dot" style={{ background: isConnected ? "#00e676" : "#ff9800" }}></span>
+        ) : (
+            <div className="sidebar-tools">
+                <div className="search-bar">
+                    <FiSearch className="search-icon" />
+                    <input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
-                <div className="my-info">
-                <h3>{myId}</h3>
-                <div className="status-text">Online</div>
-                </div>
+                <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}>
+                    <FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}
+                </button>
+                {showAddFriend && (
+                    <div className="add-friend-box">
+                        <input placeholder="Friend ID" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} />
+                        <button onClick={handleAddFriend}>Add</button>
+                    </div>
+                )}
             </div>
-            <div className="search-bar">
-                <FiSearch className="search-icon" />
-                <input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-            </div>
-            <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}>
-                <FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}
-            </button>
-            {showAddFriend && (
-                <div className="add-friend-box">
-                    <input placeholder="Friend ID" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} />
-                    <button onClick={handleAddFriend}>Add</button>
-                </div>
-            )}
-            </>
-          )}
-        </div>
+        )}
         
         <div className="users-list">
           {filteredContacts.map((user) => {
               const unreadCount = notifications.filter(n => n.senderId === user.username).length;
-
               return (
               <div key={user._id} className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`}
                 onClick={() => handleUserClick(user)} >
                 <div className="avatar">
-                  <img 
-                    src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.username}&backgroundColor=003344&textColor=00bcd4&fontWeight=700`} 
-                    alt="avatar" 
-                  />
+                  {/* Updated: Use dynamic getAvatar */}
+                  <img src={getAvatar(user.username)} alt="avatar" />
                 </div>
                 <div className="user-info">
                   <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%"}}>
@@ -298,6 +362,7 @@ const ChatInterface = ({ myId, onLogout }) => {
               </div>
           )})}
         </div>
+
         <div className="logout-area"><button onClick={onLogout}>SECURE LOGOUT</button></div>
       </div>
 
@@ -326,10 +391,8 @@ const ChatInterface = ({ myId, onLogout }) => {
                     <div className="header-left">
                         <FiArrowLeft className="back-btn icon-btn" onClick={() => setSelectedUser(null)} style={{marginRight: "15px"}}/>
                         <div className="avatar small">
-                            <img 
-                                src={`https://api.dicebear.com/7.x/initials/svg?seed=${selectedUser.username}&backgroundColor=003344&textColor=00bcd4&fontWeight=700`} 
-                                alt="avatar" 
-                            />
+                            {/* Updated: Use dynamic getAvatar */}
+                            <img src={getAvatar(selectedUser.username)} alt="avatar" />
                         </div>
                         <div className="header-info">
                         <h3>{selectedUser.username}</h3>
@@ -338,7 +401,16 @@ const ChatInterface = ({ myId, onLogout }) => {
                         </div>
                         </div>
                     </div>
+                    
                     <div className="header-icons">
+                        <div 
+                            className={`nuke-btn ${nukeCount > 0 ? "active" : ""}`} 
+                            onClick={handleNuke}
+                            title={nukeCount === 0 ? "Nuke Chat" : `${3 - nukeCount} clicks to NUKE`}
+                        >
+                            <FiAlertTriangle />
+                            {nukeCount > 0 && <span className="nuke-badge">{3 - nukeCount}</span>}
+                        </div>
                         <FiMoreVertical onClick={toggleSelectionMode} title="Select Messages" />
                     </div>
                   </>
@@ -347,8 +419,9 @@ const ChatInterface = ({ myId, onLogout }) => {
             
             <div className="messages-box">
               {currentChatMessages.map((msg, index) => {
-                const displayText = decryptedCache[msg._id || msg.time] || "🔒 Decrypting...";
+                const decryptedContent = decryptedCache[msg._id || msg.time];
                 const isSelected = selectedMsgIds.includes(msg._id);
+                const isImage = msg.type === "image" || (typeof decryptedContent === 'string' && decryptedContent.startsWith("data:image"));
                 
                 return (
                     <div key={index} className={`message-wrapper ${msg.senderId === myId ? "own" : "friend"} ${isSelectionMode ? "selectable" : ""}`}>
@@ -361,7 +434,10 @@ const ChatInterface = ({ myId, onLogout }) => {
                              onClick={() => handleMessageClick(msg)}
                              style={{cursor: isSelectionMode ? "pointer" : "default"}}
                         >
-                            <p>{displayText}</p>
+                            {!decryptedContent ? <p style={{fontStyle:"italic", opacity:0.7}}>🔒 Decrypting...</p> : 
+                             isImage ? <img src={decryptedContent} alt="Encrypted attachment" className="chat-image" onClick={(e) => { e.stopPropagation(); setViewingImage(decryptedContent); }} /> : 
+                             <p>{decryptedContent}</p>}
+                            
                             <div className="message-meta">
                             <span>{msg.time}</span>
                             {!isSelectionMode && msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ffd700"}} />}
@@ -375,64 +451,45 @@ const ChatInterface = ({ myId, onLogout }) => {
             </div>
 
             <div className="chat-input-area">
-              <button className="icon-btn"><FiPaperclip /></button>
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" style={{display: "none"}} />
+              <button className="icon-btn" onClick={handleFileClick} title="Send Image"><FiPaperclip /></button>
               <div className="input-wrapper">
                 <input type="text" placeholder="Type a secured message..." value={currentMessage}
                   onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} 
                   disabled={isSelectionMode} 
                 />
               </div>
-              <button className="send-btn" onClick={() => handleSend()} disabled={isSelectionMode}><FiSend /></button>
+              <button className="send-btn" onClick={() => handleSend(currentMessage, "text")} disabled={isSelectionMode}><FiSend /></button>
             </div>
           </>
         ) : (
-          /* --- MODIFIED: NO CHAT SCREEN WITH LOGO & NEW ID LOGIC --- */
           <div className="no-chat">
-              
-              {/* 1. Centered Large Logo (Replaces Shield) */}
-              <div className="center-brand">
-                  <h1 className="logo-text large">MSG</h1>
-                  <p className="logo-tagline">Secure. Ephemeral. Private.</p>
-              </div>
-              
+              <div className="center-brand"><h1 className="logo-text large">MSG</h1><p className="logo-tagline">Secure. Ephemeral. Private.</p></div>
               <h1>Welcome, {myId}!</h1>
-              
-              {/* 2. Updated ID Logic: Instruction Label + Click to Copy ONLY ID */}
               <p className="id-instruction">Click to copy your unique ID</p>
-              
-              <div 
-                className="welcome-id-pill" 
-                onClick={() => {
-                   navigator.clipboard.writeText(myFriendCode); 
-                   alert("ID Copied!");
-                }}
-                title="Click to copy ID"
-              >
+              <div className="welcome-id-pill" onClick={() => { navigator.clipboard.writeText(myFriendCode); alert("ID Copied!"); }} title="Click to copy ID">
                   <span className="highlight-id">{myFriendCode}</span> <FiCopy style={{marginLeft: "10px"}}/>
               </div>
-
-              {/* Security Cards Grid */}
               <div className="security-grid">
-                <div className="security-card encryption">
-                  <div className="card-icon">🔒</div>
-                  <h4>Client-Side Encryption</h4>
-                  <p>Encryption happens locally. Even if our servers are breached, messages remain unreadable.</p>
-                </div>
-                <div className="security-card timer">
-                  <div className="card-icon">⏳</div>
-                  <h4>48h Strict Auto-Delete</h4>
-                  <p>Data is permanently wiped after 48 hours. No logs, no backups, no traces left behind.</p>
-                </div>
-                <div className="security-card shield">
-                  <div className="card-icon">🛡️</div>
-                  <h4>Zero-Knowledge</h4>
-                  <p>Private keys never leave your browser. We have mathematically zero access to your chats.</p>
-                </div>
+                <div className="security-card encryption"><div className="card-icon">🔒</div><h4>Client-Side Encryption</h4><p>Encryption happens locally. Even if our servers are breached, messages remain unreadable.</p></div>
+                <div className="security-card timer"><div className="card-icon">⏳</div><h4>48h Strict Auto-Delete</h4><p>Data is permanently wiped after 48 hours. No logs, no backups, no traces left behind.</p></div>
+                <div className="security-card shield"><div className="card-icon">🛡️</div><h4>Zero-Knowledge</h4><p>Private keys never leave your browser. We have mathematically zero access to your chats.</p></div>
               </div>
-
           </div>
         )}
       </div>
+
+      {viewingImage && (
+        <div className="lightbox-overlay" onClick={() => setViewingImage(null)}>
+          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+            <img src={viewingImage} alt="Full view" className="lightbox-img" />
+            <div className="lightbox-controls">
+                <button className="lightbox-btn" onClick={() => setViewingImage(null)}><FiX /> Close</button>
+                <a href={viewingImage} download={`secure-image-${Date.now()}.png`} className="lightbox-btn"><FiDownload /> Download</a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

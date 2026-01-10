@@ -14,7 +14,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- DB CONNECTION ---
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/secureChat";
 
 mongoose
@@ -22,9 +21,9 @@ mongoose
   .then(() => console.log("✅ DB Connection Success"))
   .catch((err) => console.error("❌ DB Connection Error:", err));
 
-// --- API ROUTES ---
+// --- ROUTES ---
 
-// 1. REGISTER (Saves Private Key Backup)
+// REGISTER
 app.post("/register", async (req, res) => {
   try {
     const { username, password, publicKey, privateKey } = req.body;
@@ -42,7 +41,7 @@ app.post("/register", async (req, res) => {
         password: hashedPassword,
         friendCode,
         publicKey,
-        privateKey, // Backup saved
+        privateKey, 
         contacts: []
     });
     const savedUser = await newUser.save();
@@ -57,7 +56,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
-// 2. LOGIN (Restores Private Key)
+// LOGIN
 app.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -72,14 +71,14 @@ app.post("/login", async (req, res) => {
         username: user.username,
         friendCode: user.friendCode,
         contacts: user.contacts,
-        privateKey: user.privateKey // Backup restored
+        privateKey: user.privateKey 
     });
   } catch (err) {
     res.status(500).json(err);
   }
 });
 
-// 3. ADD CONTACT
+// ADD CONTACT
 app.post("/add-contact", async (req, res) => {
     try {
         const { myId, friendCode } = req.body;
@@ -102,7 +101,7 @@ app.post("/add-contact", async (req, res) => {
     }
 });
 
-// 4. GET CONTACTS
+// GET CONTACTS
 app.get("/contacts/:username", async (req, res) => {
   try {
     const { username } = req.params;
@@ -115,7 +114,7 @@ app.get("/contacts/:username", async (req, res) => {
   }
 });
 
-// 5. GET MESSAGES
+// GET MESSAGES
 app.get("/messages/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -128,7 +127,7 @@ app.get("/messages/:userId", async (req, res) => {
   }
 });
 
-// 6. TOGGLE SAVE MESSAGE
+// TOGGLE SAVE
 app.put("/messages/toggle/:messageId", async (req, res) => {
   try {
     const { messageId } = req.params;
@@ -149,7 +148,7 @@ app.put("/messages/toggle/:messageId", async (req, res) => {
   }
 });
 
-// 7. DELETE MESSAGES (NEW)
+// DELETE MESSAGES
 app.delete("/messages", async (req, res) => {
   try {
     const { ids } = req.body; 
@@ -160,10 +159,39 @@ app.delete("/messages", async (req, res) => {
   }
 });
 
-// --- SOCKET SERVER ---
+// --- UPDATED: NUKE CHAT (Persistent Fix) ---
+app.delete("/messages/nuke", async (req, res) => {
+    try {
+        const { myId, otherId } = req.body;
+
+        // FIXED QUERY: Use $ne: true (Not Equal to true)
+        // This catches false, null, and undefined values
+        await Message.deleteMany({
+            $or: [
+                { senderId: myId, recipientId: otherId },
+                { senderId: otherId, recipientId: myId }
+            ],
+            isSaved: { $ne: true } 
+        });
+
+        // Notify BOTH users
+        const user1 = onlineUsers.find(u => u.userId === myId);
+        const user2 = onlineUsers.find(u => u.userId === otherId);
+
+        if(user1) io.to(user1.socketId).emit("chatNuked", { target: otherId });
+        if(user2) io.to(user2.socketId).emit("chatNuked", { target: myId });
+
+        res.status(200).json("Chat Nuked");
+    } catch (err) {
+        res.status(500).json(err);
+    }
+});
+
+// --- SOCKET SERVER CONFIG ---
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST", "PUT", "DELETE"] },
+  maxHttpBufferSize: 1e7 // 10MB Limit
 });
 
 let onlineUsers = [];
@@ -177,12 +205,21 @@ io.on("connection", (socket) => {
   });
 
   socket.on("sendMessage", async (message) => {
-    const { senderId, recipientId, text, time } = message;
+    const { senderId, recipientId, text, type, time } = message; 
     try {
-      const newMessage = new Message({ senderId, recipientId, text, time });
+      const newMessage = new Message({ 
+        senderId, 
+        recipientId, 
+        text, 
+        type: type || "text", 
+        time 
+      });
       await newMessage.save();
+      
       const user = onlineUsers.find((user) => user.userId === recipientId);
-      if (user) io.to(user.socketId).emit("getMessage", newMessage);
+      if (user) {
+        io.to(user.socketId).emit("getMessage", newMessage);
+      }
     } catch (error) { console.log(error); }
   });
 

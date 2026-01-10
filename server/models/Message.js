@@ -4,10 +4,11 @@ const MessageSchema = new mongoose.Schema(
   {
     senderId: { type: String, required: true },
     recipientId: { type: String, required: true },
-    text: { type: String, required: true }, // This will store the "Gibberish" later
+    text: { type: String, required: true }, // Stores encrypted text or Base64 image
+    type: { type: String, default: "text" }, // New: 'text' or 'image'
     time: { type: String, required: true },
-    isSaved: { type: Boolean, default: false }, // New: Check if user saved it
-    expireAt: { type: Date, default: Date.now, index: { expires: '48h' } } // New: Auto-delete in 48h
+    isSaved: { type: Boolean, default: false },
+    expireAt: { type: Date, default: Date.now, index: { expires: '48h' } }
   },
   { timestamps: true }
 );
