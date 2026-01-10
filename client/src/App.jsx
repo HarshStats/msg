@@ -2,17 +2,17 @@ import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 import { 
   FiSearch, FiPaperclip, FiSend, FiMoreVertical, 
-  FiPhone, FiVideo, FiArrowLeft, FiLock, FiUnlock 
+  FiPhone, FiVideo, FiArrowLeft, FiUserPlus, FiCopy 
 } from "react-icons/fi"; 
-import { BsCheck2All, BsBookmarkStarFill, BsBookmarkStar } from "react-icons/bs"; 
-import AES from 'crypto-js/aes';
-import encUtf8 from 'crypto-js/enc-utf8';
+import { BsCheck2All, BsBookmarkStarFill } from "react-icons/bs"; 
 import Login from "./Login"; 
+import { deriveSharedKey, encryptText, decryptText } from "./crypto"; 
 import "./App.css";
 
 function App() {
   const [myId, setMyId] = useState(() => localStorage.getItem("chat_username"));
 
+  // If not logged in, show Login Screen
   if (!myId) {
     return (
       <Login onLogin={(username) => {
@@ -32,149 +32,151 @@ const ChatInterface = ({ myId, onLogout }) => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   
-  // Data States
   const [onlineUsers, setOnlineUsers] = useState([]); 
-  const [allUsers, setAllUsers] = useState([]); 
+  const [contacts, setContacts] = useState([]); 
   const [messages, setMessages] = useState([]); 
   
-  // UI States
   const [selectedUser, setSelectedUser] = useState(null);
   const [currentMessage, setCurrentMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [notifications, setNotifications] = useState([]);
   
-  // SECURITY STATE
-  const [secretKey, setSecretKey] = useState(""); 
-  const [isKeySet, setIsKeySet] = useState(false);
+  // NEW: Add Friend State
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [friendCodeInput, setFriendCodeInput] = useState("");
+  const myFriendCode = localStorage.getItem("my_friend_code") || "Loading...";
 
+  const sharedKeysCache = useRef({}); 
   const scrollRef = useRef();
   const selectedUserRef = useRef(null);
 
-  useEffect(() => {
-    selectedUserRef.current = selectedUser;
-  }, [selectedUser]);
+  useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
   
-  // 1. HELPER: Encryption / Decryption
-  const encryptMessage = (text) => {
-    if (!isKeySet || !secretKey) return text;
-    return AES.encrypt(text, secretKey).toString();
-  };
-
-  const decryptMessage = (cipherText) => {
-    if (!isKeySet || !secretKey) return "🔒 Encrypted";
-    try {
-      const bytes = AES.decrypt(cipherText, secretKey);
-      const originalText = bytes.toString(encUtf8);
-      return originalText || "🔒 Locked (Wrong Key)";
-    } catch (e) {
-      return "🔒 Locked";
-    }
-  };
-
-  // 2. INITIAL DATA FETCH
-  useEffect(() => {
-    const fetchData = async () => {
+  // 1. FETCH CONTACTS
+  const fetchContacts = async () => {
       try {
-        const userRes = await fetch("http://localhost:3000/users");
-        const userData = await userRes.json();
-        setAllUsers(userData);
+        const res = await fetch(`http://localhost:3000/contacts/${myId}`);
+        const data = await res.json();
+        setContacts(data || []);
+      } catch (err) { console.error(err); }
+  };
 
-        const msgRes = await fetch(`http://localhost:3000/messages/${myId}`);
-        const msgData = await msgRes.json();
-        setMessages(msgData);
-      } catch (err) {
-        console.log("Error fetching data", err);
-      }
+  useEffect(() => {
+    fetchContacts();
+    const fetchMsgs = async () => {
+        try {
+            const res = await fetch(`http://localhost:3000/messages/${myId}`);
+            const data = await res.json();
+            setMessages(data);
+        } catch(e) {}
     };
-    fetchData();
+    fetchMsgs();
   }, [myId]);
 
-  // 3. SOCKET CONNECTION
+  // 2. SOCKET
   useEffect(() => {
     const newSocket = io("http://localhost:3000");
     setSocket(newSocket);
-
-    newSocket.on("connect", () => {
-      setIsConnected(true);
-      newSocket.emit("addNewUser", myId);
-    });
-
+    newSocket.on("connect", () => { setIsConnected(true); newSocket.emit("addNewUser", myId); });
     newSocket.on("disconnect", () => setIsConnected(false));
     newSocket.on("getOnlineUsers", (users) => setOnlineUsers(users));
-
     newSocket.on("getMessage", (message) => {
       setMessages((prev) => [...prev, message]);
       if (selectedUserRef.current?.username !== message.senderId) {
         setNotifications((prev) => [message, ...prev]);
       }
     });
-
     return () => newSocket.disconnect();
   }, [myId]);
 
-  // 4. HANDLERS
-  const handleSend = () => {
+  // 3. CRYPTO HELPER
+  const getSharedKey = async (otherUser) => {
+      if (!otherUser) return null;
+      if (sharedKeysCache.current[otherUser.username]) return sharedKeysCache.current[otherUser.username];
+
+      const myPrivKeyJwk = JSON.parse(localStorage.getItem(`priv_${myId}`));
+      if (!myPrivKeyJwk || !otherUser.publicKey) return null;
+
+      const key = await deriveSharedKey(myPrivKeyJwk, otherUser.publicKey);
+      sharedKeysCache.current[otherUser.username] = key;
+      return key;
+  };
+
+  // 4. SEND MESSAGE
+  const handleSend = async () => {
     if (!currentMessage.trim() || !selectedUser) return;
     
-    const encryptedText = encryptMessage(currentMessage);
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const sharedKey = await getSharedKey(selectedUser);
+    let finalPayload = currentMessage;
+    if (sharedKey) {
+        finalPayload = await encryptText(sharedKey, currentMessage);
+    }
     
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const messageData = {
-      senderId: myId, recipientId: selectedUser.username, text: encryptedText, time: time,
+      senderId: myId, recipientId: selectedUser.username, text: finalPayload, time: time,
     };
     
     socket.emit("sendMessage", messageData);
-    // Note: We don't add strictly to state here because socket will send it back to us if we are listening correctly,
-    // but for instant UI response, we often add it. 
-    // Ideally, the server response should contain the _id so we can save it immediately.
-    // For now, we will wait for the socket "getMessage" or refresh to get the ID for saving.
+    setMessages((prev) => [...prev, messageData]); 
+    setCurrentMessage("");
+  };
+
+  // 5. ADD FRIEND
+  const handleAddFriend = async () => {
+      if(!friendCodeInput) return;
+      try {
+          const res = await fetch("http://localhost:3000/add-contact", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({ myId, friendCode: friendCodeInput })
+          });
+          const msg = await res.json();
+          alert(msg);
+          if (res.ok) {
+              setShowAddFriend(false);
+              setFriendCodeInput("");
+              fetchContacts();
+          }
+      } catch(err) { alert("Error adding friend"); }
   };
 
   const handleToggleMessage = async (msgId) => {
-    if (!isKeySet) {
-        alert("Enter the chat password to modify messages!");
-        return;
-    }
-    try {
-      // Optimistic UI Update (Change it instantly on screen)
-      setMessages(prev => prev.map(m => {
-          if (m._id === msgId) {
-              return { ...m, isSaved: !m.isSaved };
+      setMessages(prev => prev.map(m => m._id === msgId ? { ...m, isSaved: !m.isSaved } : m));
+      await fetch(`http://localhost:3000/messages/toggle/${msgId}`, { method: "PUT" });
+  };
+
+  // 6. DECRYPTION
+  const [decryptedCache, setDecryptedCache] = useState({});
+
+  useEffect(() => {
+      const processMessages = async () => {
+          const newCache = { ...decryptedCache };
+          for (let msg of currentChatMessages) {
+              if (!newCache[msg._id || msg.time]) { 
+                  const otherUsername = msg.senderId === myId ? msg.recipientId : msg.senderId;
+                  const contact = contacts.find(c => c.username === otherUsername);
+                  if (contact) {
+                      const key = await getSharedKey(contact);
+                      if (key) {
+                          const text = await decryptText(key, msg.text);
+                          newCache[msg._id || msg.time] = text;
+                      }
+                  }
+              }
           }
-          return m;
-      }));
+          setDecryptedCache(newCache);
+      };
+      if (currentChatMessages.length > 0) processMessages();
+  }, [messages, selectedUser]); 
 
-      // Send request to server
-      const res = await fetch(`http://localhost:3000/messages/toggle/${msgId}`, { method: "PUT" });
-      const data = await res.json();
-      
-      // If server fails, revert UI (Optional, but good practice)
-      if (!res.ok) {
-          console.error("Toggle failed");
-      }
-    } catch (err) {
-      console.error("Failed to toggle save", err);
-    }
-  };
-
-  const getLastMessage = (userId) => {
-    const userMessages = messages.filter(
-      (m) => (m.senderId === myId && m.recipientId === userId) || (m.senderId === userId && m.recipientId === myId)
-    );
-    return userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
-  };
-
-  const filteredUsers = allUsers.filter(u => 
-    u.username !== myId && u.username.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const currentChatMessages = messages.filter(
-    (msg) =>
+  const filteredContacts = contacts.filter(u => u.username.toLowerCase().includes(searchTerm.toLowerCase()));
+  const currentChatMessages = messages.filter(msg => 
       (msg.senderId === myId && msg.recipientId === selectedUser?.username) ||
       (msg.senderId === selectedUser?.username && msg.recipientId === myId)
   );
-
-  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [currentChatMessages]);
+  
+  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [currentChatMessages, decryptedCache]);
 
   return (
     <div className="app-container">
@@ -183,81 +185,54 @@ const ChatInterface = ({ myId, onLogout }) => {
         <div className="sidebar-header">
           <div className="my-profile">
             <div className="avatar">
-              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="avatar" />
-              <span className="online-dot" style={{ background: isConnected ? "#4caf50" : "#ff9800" }}></span>
+               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="avatar" />
+               <span className="online-dot" style={{ background: isConnected ? "#4caf50" : "#ff9800" }}></span>
             </div>
             <div className="my-info">
-              <h3>{myId} (You)</h3>
-              <span className="status-text" style={{ color: isConnected ? "#4caf50" : "#ff9800" }}>
-                {isConnected ? "Secure" : "Connecting..."}
-              </span>
+              <h3>{myId}</h3>
+              <div className="copy-code" onClick={() => {navigator.clipboard.writeText(myFriendCode); alert("Copied: " + myFriendCode)}}>
+                  <span>ID: {myFriendCode}</span> <FiCopy />
+              </div>
             </div>
           </div>
           
-          <div className={`security-bar ${isKeySet ? "locked" : ""}`}>
-            {isKeySet ? <FiLock className="lock-icon" /> : <FiUnlock className="unlock-icon" />}
-            <input 
-              type="password" 
-              placeholder={isKeySet ? "Chat is Encrypted" : "Set Chat Password"} 
-              value={secretKey}
-              disabled={isKeySet}
-              onChange={(e) => setSecretKey(e.target.value)}
-            />
-            <button onClick={() => setIsKeySet(!isKeySet)}>
-              {isKeySet ? "Reset" : "Set"}
-            </button>
-          </div>
-
           <div className="search-bar">
             <FiSearch className="search-icon" />
-            <input 
-              type="text" placeholder="Search" value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+            <input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
+          
+          <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}>
+              <FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}
+          </button>
+          
+          {showAddFriend && (
+              <div className="add-friend-box">
+                  <input placeholder="Enter Friend ID (e.g. USER-1234)" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} />
+                  <button onClick={handleAddFriend}>Add</button>
+              </div>
+          )}
         </div>
         
         <div className="users-list">
-          {filteredUsers.map((user) => {
+          {filteredContacts.length === 0 && <p style={{padding: "20px", color: "#888", textAlign: "center", fontSize: "12px"}}>No friends yet.<br/>Share your ID to connect!</p>}
+          {filteredContacts.map((user) => {
             const isOnline = onlineUsers.some((online) => online.userId === user.username);
-            const lastMsg = getLastMessage(user.username);
             const unreadCount = notifications.filter(n => n.senderId === user.username).length;
-            
-            let previewText = "No messages";
-            if(lastMsg) {
-                previewText = lastMsg.senderId === myId 
-                    ? `You: ${decryptMessage(lastMsg.text)}` 
-                    : decryptMessage(lastMsg.text);
-            }
-
             return (
-              <div
-                key={user._id} 
-                className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`}
-                onClick={() => {
-                  setSelectedUser(user);
-                  setNotifications((prev) => prev.filter((n) => n.senderId !== user.username));
-                }}
-              >
+              <div key={user._id} className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`}
+                onClick={() => { setSelectedUser(user); setNotifications((prev) => prev.filter((n) => n.senderId !== user.username)); }} >
                 <div className="avatar">
                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="avatar" />
                   {isOnline && <span className="online-dot"></span>}
                 </div>
                 <div className="user-info">
-                  <div className="info-top">
-                    <span className="username">{user.username}</span>
-                    <span className="last-time">{lastMsg?.time || ""}</span>
-                  </div>
-                  <div className="info-bottom">
-                    <p className="last-msg">{previewText}</p>
-                    {unreadCount > 0 && <div className="badge">{unreadCount}</div>}
-                  </div>
+                  <span className="username">{user.username}</span>
+                  {unreadCount > 0 && <div className="badge">{unreadCount}</div>}
                 </div>
               </div>
             );
           })}
         </div>
-        
         <div className="logout-area"><button onClick={onLogout}>Logout</button></div>
       </div>
 
@@ -268,14 +243,10 @@ const ChatInterface = ({ myId, onLogout }) => {
             <div className="chat-header">
               <div className="header-left">
                 <FiArrowLeft className="back-btn" onClick={() => setSelectedUser(null)} />
-                <div className="avatar small">
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedUser.username}`} alt="avatar" />
-                </div>
+                <div className="avatar small"><img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedUser.username}`} alt="avatar" /></div>
                 <div className="header-info">
                   <h3>{selectedUser.username}</h3>
-                  <span style={{color: "#888", fontSize: "12px"}}>
-                    {isKeySet ? "🔒 End-to-End Encrypted" : "⚠️ Unencrypted (Set Password)"}
-                  </span>
+                  <span style={{color: "#4caf50", fontSize: "12px"}}>🔒 End-to-End Encrypted</span>
                 </div>
               </div>
               <div className="header-icons"><FiPhone /><FiVideo /><FiMoreVertical /></div>
@@ -283,21 +254,13 @@ const ChatInterface = ({ myId, onLogout }) => {
             
             <div className="messages-box">
               {currentChatMessages.map((msg, index) => {
-                const decryptedText = decryptMessage(msg.text);
+                const displayText = decryptedCache[msg._id || msg.time] || "🔒 Decrypting...";
                 return (
                     <div key={index} className={`message-wrapper ${msg.senderId === myId ? "own" : "friend"}`}>
-                    <div className="message-content" 
-                         onClick={() => {
-                             // Allow click on ANY message if key is set
-                             if(msg._id && isKeySet) handleToggleMessage(msg._id);
-                         }}
-                         style={{ cursor: isKeySet ? "pointer" : "default" }}
-                         title={msg.isSaved ? "Saved (Click to Unsave)" : "Click to Save (vanishes in 48h)"}
-                    >
-                        <p>{decryptedText}</p>
+                    <div className="message-content" onClick={() => {if(msg._id) handleToggleMessage(msg._id)}} style={{cursor:"pointer"}} title="Toggle Save">
+                        <p>{displayText}</p>
                         <div className="message-meta">
                         <span>{msg.time}</span>
-                        {/* Show Different Icons for Saved State */}
                         {msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ff9800"}} />}
                         {msg.senderId === myId && <BsCheck2All className="read-icon" />}
                         </div>
@@ -311,19 +274,18 @@ const ChatInterface = ({ myId, onLogout }) => {
             <div className="chat-input-area">
               <button className="icon-btn"><FiPaperclip /></button>
               <div className="input-wrapper">
-                <input
-                  type="text" placeholder={isKeySet ? "Write a secured message..." : "Set Password to chat..."}
-                  value={currentMessage}
-                  disabled={!isKeySet} 
-                  onChange={(e) => setCurrentMessage(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                />
+                <input type="text" placeholder="Message..." value={currentMessage}
+                  onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} />
               </div>
-              <button className="send-btn" onClick={handleSend} disabled={!isKeySet}><FiSend /></button>
+              <button className="send-btn" onClick={handleSend}><FiSend /></button>
             </div>
           </>
         ) : (
-          <div className="no-chat"><p>Select a user & enter password to chat</p></div>
+          <div className="no-chat">
+             <h3>Welcome {myId}!</h3>
+             <p>Your Friend ID: <b>{myFriendCode}</b></p>
+             <p>Share this ID to start chatting.</p>
+          </div>
         )}
       </div>
     </div>
