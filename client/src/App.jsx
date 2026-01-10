@@ -2,9 +2,10 @@ import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 import { 
   FiSearch, FiPaperclip, FiSend, FiMoreVertical, 
-  FiPhone, FiVideo, FiArrowLeft, FiUserPlus, FiCopy 
+  FiPhone, FiVideo, FiArrowLeft, FiUserPlus, FiCopy,
+  FiTrash2, FiCornerUpRight, FiX
 } from "react-icons/fi"; 
-import { BsCheck2All, BsBookmarkStarFill } from "react-icons/bs"; 
+import { BsCheck2All, BsBookmarkStarFill, BsCircle, BsCheckCircleFill } from "react-icons/bs"; 
 import Login from "./Login"; 
 import { deriveSharedKey, encryptText, decryptText } from "./crypto"; 
 import "./App.css";
@@ -12,14 +13,11 @@ import "./App.css";
 function App() {
   const [myId, setMyId] = useState(() => localStorage.getItem("chat_username"));
 
-  // If not logged in, show Login Screen
   if (!myId) {
-    return (
-      <Login onLogin={(username) => {
+    return <Login onLogin={(username) => {
         setMyId(username);
         localStorage.setItem("chat_username", username);
-      }} />
-    );
+      }} />;
   }
 
   return <ChatInterface myId={myId} onLogout={() => {
@@ -41,18 +39,23 @@ const ChatInterface = ({ myId, onLogout }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [notifications, setNotifications] = useState([]);
   
-  // NEW: Add Friend State
+  // --- SELECT / DELETE / FORWARD STATE ---
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedMsgIds, setSelectedMsgIds] = useState([]);
+  const [isForwarding, setIsForwarding] = useState(false); 
+  
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendCodeInput, setFriendCodeInput] = useState("");
   const myFriendCode = localStorage.getItem("my_friend_code") || "Loading...";
 
+  const [decryptedCache, setDecryptedCache] = useState({});
   const sharedKeysCache = useRef({}); 
   const scrollRef = useRef();
   const selectedUserRef = useRef(null);
 
   useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
   
-  // 1. FETCH CONTACTS
+  // 1. DATA FETCHING
   const fetchContacts = async () => {
       try {
         const res = await fetch(`http://localhost:3000/contacts/${myId}`);
@@ -89,7 +92,7 @@ const ChatInterface = ({ myId, onLogout }) => {
     return () => newSocket.disconnect();
   }, [myId]);
 
-  // 3. CRYPTO HELPER
+  // 3. CRYPTO HELPERS
   const getSharedKey = async (otherUser) => {
       if (!otherUser) return null;
       if (sharedKeysCache.current[otherUser.username]) return sharedKeysCache.current[otherUser.username];
@@ -102,72 +105,130 @@ const ChatInterface = ({ myId, onLogout }) => {
       return key;
   };
 
-  // 4. SEND MESSAGE
-  const handleSend = async () => {
-    if (!currentMessage.trim() || !selectedUser) return;
+  // 4. ACTION HANDLERS
+
+  // SEND MESSAGE
+  const handleSend = async (textToSend = currentMessage, recipient = selectedUser) => {
+    if (!textToSend?.trim() || !recipient) return;
     
-    const sharedKey = await getSharedKey(selectedUser);
-    let finalPayload = currentMessage;
+    const sharedKey = await getSharedKey(recipient);
+    let finalPayload = textToSend;
     if (sharedKey) {
-        finalPayload = await encryptText(sharedKey, currentMessage);
+        finalPayload = await encryptText(sharedKey, textToSend);
     }
     
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const messageData = {
-      senderId: myId, recipientId: selectedUser.username, text: finalPayload, time: time,
+      senderId: myId, recipientId: recipient.username, text: finalPayload, time: time,
     };
     
     socket.emit("sendMessage", messageData);
     setMessages((prev) => [...prev, messageData]); 
-    setCurrentMessage("");
+    if(recipient === selectedUser) setCurrentMessage("");
   };
 
-  // 5. ADD FRIEND
   const handleAddFriend = async () => {
       if(!friendCodeInput) return;
       try {
           const res = await fetch("http://localhost:3000/add-contact", {
-              method: "POST",
-              headers: {"Content-Type": "application/json"},
+              method: "POST", headers: {"Content-Type": "application/json"},
               body: JSON.stringify({ myId, friendCode: friendCodeInput })
           });
-          const msg = await res.json();
-          alert(msg);
-          if (res.ok) {
-              setShowAddFriend(false);
-              setFriendCodeInput("");
-              fetchContacts();
-          }
+          if (res.ok) { setShowAddFriend(false); setFriendCodeInput(""); fetchContacts(); }
       } catch(err) { alert("Error adding friend"); }
   };
 
-  const handleToggleMessage = async (msgId) => {
-      setMessages(prev => prev.map(m => m._id === msgId ? { ...m, isSaved: !m.isSaved } : m));
-      await fetch(`http://localhost:3000/messages/toggle/${msgId}`, { method: "PUT" });
+  // --- SELECTION LOGIC ---
+  const toggleSelectionMode = () => {
+      setIsSelectionMode(!isSelectionMode);
+      setSelectedMsgIds([]);
+      setIsForwarding(false);
   };
 
-  // 6. DECRYPTION
-  const [decryptedCache, setDecryptedCache] = useState({});
+  const handleMessageClick = async (msg) => {
+      // IF SELECTING: Toggle Checkbox
+      if (isSelectionMode) {
+          if (selectedMsgIds.includes(msg._id)) {
+              setSelectedMsgIds(prev => prev.filter(id => id !== msg._id));
+          } else {
+              setSelectedMsgIds(prev => [...prev, msg._id]);
+          }
+          return;
+      }
+      
+      // IF NORMAL: Toggle Save
+      if(msg._id) {
+          setMessages(prev => prev.map(m => m._id === msg._id ? { ...m, isSaved: !m.isSaved } : m));
+          await fetch(`http://localhost:3000/messages/toggle/${msg._id}`, { method: "PUT" });
+      }
+  };
 
+  // --- DELETE LOGIC ---
+  const handleDeleteSelected = async () => {
+      if(!window.confirm(`Delete ${selectedMsgIds.length} messages?`)) return;
+      
+      try {
+          await fetch("http://localhost:3000/messages", {
+              method: "DELETE", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ids: selectedMsgIds })
+          });
+          setMessages(prev => prev.filter(m => !selectedMsgIds.includes(m._id)));
+          setIsSelectionMode(false);
+          setSelectedMsgIds([]);
+      } catch(e) { console.error("Delete failed", e); }
+  };
+
+  // --- FORWARD LOGIC ---
+  const initForwarding = () => {
+      setIsForwarding(true); 
+      alert("Select a contact to forward to");
+  };
+
+  const handleUserClick = async (user) => {
+      // IF FORWARDING
+      if (isForwarding) {
+          if(!window.confirm(`Forward ${selectedMsgIds.length} messages to ${user.username}?`)) return;
+          
+          for (let msgId of selectedMsgIds) {
+              const rawText = decryptedCache[msgId]; 
+              if (rawText) await handleSend(rawText, user);
+          }
+          setIsForwarding(false);
+          setIsSelectionMode(false);
+          setSelectedMsgIds([]);
+          setSelectedUser(user); 
+          return;
+      }
+
+      // NORMAL SWITCH CHAT
+      setSelectedUser(user);
+      setNotifications((prev) => prev.filter((n) => n.senderId !== user.username));
+      setIsSelectionMode(false); 
+  };
+
+
+  // 6. DECRYPTION
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
           for (let msg of currentChatMessages) {
-              if (!newCache[msg._id || msg.time]) { 
+              const keyId = msg._id || msg.time;
+              if (!newCache[keyId]) { 
                   const otherUsername = msg.senderId === myId ? msg.recipientId : msg.senderId;
                   const contact = contacts.find(c => c.username === otherUsername);
                   if (contact) {
                       const key = await getSharedKey(contact);
                       if (key) {
                           const text = await decryptText(key, msg.text);
-                          newCache[msg._id || msg.time] = text;
+                          newCache[keyId] = text; 
+                          if(msg._id) newCache[msg._id] = text; // Cache by ID for forwarding
                       }
                   }
               }
           }
           setDecryptedCache(newCache);
       };
-      if (currentChatMessages.length > 0) processMessages();
+      if (messages.length > 0 && selectedUser) processMessages();
   }, [messages, selectedUser]); 
 
   const filteredContacts = contacts.filter(u => u.username.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -183,55 +244,55 @@ const ChatInterface = ({ myId, onLogout }) => {
       {/* SIDEBAR */}
       <div className={`sidebar ${selectedUser ? "mobile-hidden" : ""}`}>
         <div className="sidebar-header">
-          <div className="my-profile">
-            <div className="avatar">
-               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="avatar" />
-               <span className="online-dot" style={{ background: isConnected ? "#4caf50" : "#ff9800" }}></span>
+          {isForwarding ? (
+             <div className="forward-header">
+                <h3>Select Recipient</h3>
+                <button onClick={() => {setIsForwarding(false); setIsSelectionMode(false)}}>Cancel</button>
+             </div>
+          ) : (
+            <>
+            <div className="my-profile">
+                <div className="avatar">
+                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="avatar" />
+                <span className="online-dot" style={{ background: isConnected ? "#4caf50" : "#ff9800" }}></span>
+                </div>
+                <div className="my-info">
+                <h3>{myId}</h3>
+                <div className="copy-code" onClick={() => {navigator.clipboard.writeText(myFriendCode); alert("Copied!")}}>
+                    <span>ID: {myFriendCode}</span> <FiCopy />
+                </div>
+                </div>
             </div>
-            <div className="my-info">
-              <h3>{myId}</h3>
-              <div className="copy-code" onClick={() => {navigator.clipboard.writeText(myFriendCode); alert("Copied: " + myFriendCode)}}>
-                  <span>ID: {myFriendCode}</span> <FiCopy />
-              </div>
+            <div className="search-bar">
+                <FiSearch className="search-icon" />
+                <input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
-          </div>
-          
-          <div className="search-bar">
-            <FiSearch className="search-icon" />
-            <input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-          </div>
-          
-          <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}>
-              <FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}
-          </button>
-          
-          {showAddFriend && (
-              <div className="add-friend-box">
-                  <input placeholder="Enter Friend ID (e.g. USER-1234)" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} />
-                  <button onClick={handleAddFriend}>Add</button>
-              </div>
+            <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}>
+                <FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}
+            </button>
+            {showAddFriend && (
+                <div className="add-friend-box">
+                    <input placeholder="Friend ID" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} />
+                    <button onClick={handleAddFriend}>Add</button>
+                </div>
+            )}
+            </>
           )}
         </div>
         
         <div className="users-list">
-          {filteredContacts.length === 0 && <p style={{padding: "20px", color: "#888", textAlign: "center", fontSize: "12px"}}>No friends yet.<br/>Share your ID to connect!</p>}
-          {filteredContacts.map((user) => {
-            const isOnline = onlineUsers.some((online) => online.userId === user.username);
-            const unreadCount = notifications.filter(n => n.senderId === user.username).length;
-            return (
+          {filteredContacts.map((user) => (
               <div key={user._id} className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`}
-                onClick={() => { setSelectedUser(user); setNotifications((prev) => prev.filter((n) => n.senderId !== user.username)); }} >
+                onClick={() => handleUserClick(user)} >
                 <div className="avatar">
                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="avatar" />
-                  {isOnline && <span className="online-dot"></span>}
                 </div>
                 <div className="user-info">
                   <span className="username">{user.username}</span>
-                  {unreadCount > 0 && <div className="badge">{unreadCount}</div>}
+                  {isForwarding && <FiCornerUpRight style={{color: "#0088cc"}} />}
                 </div>
               </div>
-            );
-          })}
+          ))}
         </div>
         <div className="logout-area"><button onClick={onLogout}>Logout</button></div>
       </div>
@@ -240,31 +301,62 @@ const ChatInterface = ({ myId, onLogout }) => {
       <div className={`chat-area ${!selectedUser ? "mobile-hidden" : ""}`}>
         {selectedUser ? (
           <>
-            <div className="chat-header">
-              <div className="header-left">
-                <FiArrowLeft className="back-btn" onClick={() => setSelectedUser(null)} />
-                <div className="avatar small"><img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedUser.username}`} alt="avatar" /></div>
-                <div className="header-info">
-                  <h3>{selectedUser.username}</h3>
-                  <span style={{color: "#4caf50", fontSize: "12px"}}>🔒 End-to-End Encrypted</span>
-                </div>
-              </div>
-              <div className="header-icons"><FiPhone /><FiVideo /><FiMoreVertical /></div>
+            <div className={`chat-header ${isSelectionMode ? "selection-mode" : ""}`}>
+              {isSelectionMode ? (
+                  <div className="header-left selection-tools" style={{width:"100%", justifyContent:"space-between"}}>
+                      <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
+                        <FiX className="icon-btn" onClick={toggleSelectionMode} />
+                        <span style={{fontWeight:"bold"}}>{selectedMsgIds.length} Selected</span>
+                      </div>
+                      <div style={{display:"flex", gap:"20px"}}>
+                          {selectedMsgIds.length > 0 && (
+                              <>
+                                <FiTrash2 className="icon-btn" onClick={handleDeleteSelected} title="Delete" />
+                                <FiCornerUpRight className="icon-btn" onClick={initForwarding} title="Forward" />
+                              </>
+                          )}
+                      </div>
+                  </div>
+              ) : (
+                  <>
+                    <div className="header-left">
+                        <FiArrowLeft className="back-btn" onClick={() => setSelectedUser(null)} />
+                        <div className="avatar small"><img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedUser.username}`} alt="avatar" /></div>
+                        <div className="header-info">
+                        <h3>{selectedUser.username}</h3>
+                        <span style={{color: "#4caf50", fontSize: "12px"}}>🔒 End-to-End Encrypted</span>
+                        </div>
+                    </div>
+                    <div className="header-icons">
+                        <FiMoreVertical onClick={toggleSelectionMode} title="Select Messages" style={{cursor:"pointer"}}/>
+                    </div>
+                  </>
+              )}
             </div>
             
             <div className="messages-box">
               {currentChatMessages.map((msg, index) => {
                 const displayText = decryptedCache[msg._id || msg.time] || "🔒 Decrypting...";
+                const isSelected = selectedMsgIds.includes(msg._id);
+                
                 return (
-                    <div key={index} className={`message-wrapper ${msg.senderId === myId ? "own" : "friend"}`}>
-                    <div className="message-content" onClick={() => {if(msg._id) handleToggleMessage(msg._id)}} style={{cursor:"pointer"}} title="Toggle Save">
-                        <p>{displayText}</p>
-                        <div className="message-meta">
-                        <span>{msg.time}</span>
-                        {msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ff9800"}} />}
-                        {msg.senderId === myId && <BsCheck2All className="read-icon" />}
+                    <div key={index} className={`message-wrapper ${msg.senderId === myId ? "own" : "friend"} ${isSelectionMode ? "selectable" : ""}`}>
+                        {isSelectionMode && (
+                            <div className="selection-checkbox" onClick={() => handleMessageClick(msg)}>
+                                {isSelected ? <BsCheckCircleFill color="#0088cc" size={20}/> : <BsCircle color="#ccc" size={20}/>}
+                            </div>
+                        )}
+                        <div className={`message-content ${isSelected ? "selected-bubble" : ""}`} 
+                             onClick={() => handleMessageClick(msg)}
+                             style={{cursor: isSelectionMode ? "pointer" : "default"}}
+                        >
+                            <p>{displayText}</p>
+                            <div className="message-meta">
+                            <span>{msg.time}</span>
+                            {!isSelectionMode && msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ff9800"}} />}
+                            {!isSelectionMode && msg.senderId === myId && <BsCheck2All className="read-icon" />}
+                            </div>
                         </div>
-                    </div>
                     </div>
                 );
               })}
@@ -275,16 +367,17 @@ const ChatInterface = ({ myId, onLogout }) => {
               <button className="icon-btn"><FiPaperclip /></button>
               <div className="input-wrapper">
                 <input type="text" placeholder="Message..." value={currentMessage}
-                  onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} />
+                  onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} 
+                  disabled={isSelectionMode} 
+                />
               </div>
-              <button className="send-btn" onClick={handleSend}><FiSend /></button>
+              <button className="send-btn" onClick={() => handleSend()} disabled={isSelectionMode}><FiSend /></button>
             </div>
           </>
         ) : (
           <div className="no-chat">
              <h3>Welcome {myId}!</h3>
              <p>Your Friend ID: <b>{myFriendCode}</b></p>
-             <p>Share this ID to start chatting.</p>
           </div>
         )}
       </div>

@@ -5,7 +5,6 @@ import { Server } from "socket.io";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs"; 
-import { v4 as uuidv4 } from 'uuid'; // You might need to install this: npm install uuid
 import Message from "./models/Message.js";
 import User from "./models/User.js"; 
 
@@ -15,7 +14,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/chatApp";
+// --- DB CONNECTION ---
+const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/secureChat";
 
 mongoose
   .connect(MONGO_URI)
@@ -24,10 +24,10 @@ mongoose
 
 // --- API ROUTES ---
 
-// 1. REGISTER
+// 1. REGISTER (Saves Private Key Backup)
 app.post("/register", async (req, res) => {
   try {
-    const { username, password, publicKey, privateKey } = req.body; // ACCEPT PRIVATE KEY
+    const { username, password, publicKey, privateKey } = req.body;
     const existingUser = await User.findOne({ username });
     if (existingUser) return res.status(400).json("Username already taken");
 
@@ -42,7 +42,7 @@ app.post("/register", async (req, res) => {
         password: hashedPassword,
         friendCode,
         publicKey,
-        privateKey, // SAVE IT
+        privateKey, // Backup saved
         contacts: []
     });
     const savedUser = await newUser.save();
@@ -57,7 +57,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
-// 2. LOGIN
+// 2. LOGIN (Restores Private Key)
 app.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -72,51 +72,42 @@ app.post("/login", async (req, res) => {
         username: user.username,
         friendCode: user.friendCode,
         contacts: user.contacts,
-        privateKey: user.privateKey // SEND IT BACK
+        privateKey: user.privateKey // Backup restored
     });
   } catch (err) {
     res.status(500).json(err);
   }
 });
 
-// 3. ADD CONTACT (New!)
+// 3. ADD CONTACT
 app.post("/add-contact", async (req, res) => {
     try {
         const { myId, friendCode } = req.body;
-        
-        // Find the friend by their code
         const friend = await User.findOne({ friendCode });
         if (!friend) return res.status(404).json("User not found with that code");
-        
         if (friend.username === myId) return res.status(400).json("You cannot add yourself");
 
-        // Add friend to my contacts
         const me = await User.findOne({ username: myId });
         if (!me.contacts.includes(friend.username)) {
             me.contacts.push(friend.username);
             await me.save();
         }
-
-        // Also add ME to FRIEND'S contacts (Two-way friendship for simplicity)
         if (!friend.contacts.includes(myId)) {
             friend.contacts.push(myId);
             await friend.save();
         }
-
         res.status(200).json("Contact added successfully");
     } catch (err) {
         res.status(500).json(err);
     }
 });
 
-// 4. GET MY CONTACTS (Replaces "Get All Users")
+// 4. GET CONTACTS
 app.get("/contacts/:username", async (req, res) => {
   try {
     const { username } = req.params;
     const user = await User.findOne({ username });
     if(!user) return res.status(404).json([]);
-
-    // Find all users who are in my contact list
     const contacts = await User.find({ username: { $in: user.contacts } }, "username publicKey friendCode");
     res.status(200).json(contacts);
   } catch (err) {
@@ -124,7 +115,7 @@ app.get("/contacts/:username", async (req, res) => {
   }
 });
 
-// 5. GET MESSAGES (Same as before)
+// 5. GET MESSAGES
 app.get("/messages/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -158,10 +149,21 @@ app.put("/messages/toggle/:messageId", async (req, res) => {
   }
 });
 
+// 7. DELETE MESSAGES (NEW)
+app.delete("/messages", async (req, res) => {
+  try {
+    const { ids } = req.body; 
+    await Message.deleteMany({ _id: { $in: ids } });
+    res.status(200).json("Messages deleted");
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
 // --- SOCKET SERVER ---
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST", "PUT"] },
+  cors: { origin: "*", methods: ["GET", "POST", "PUT", "DELETE"] },
 });
 
 let onlineUsers = [];
