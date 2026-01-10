@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 import { 
   FiSearch, FiPaperclip, FiSend, FiMoreVertical, 
-  FiPhone, FiVideo, FiArrowLeft, FiUserPlus, FiCopy,
-  FiTrash2, FiCornerUpRight, FiX
+  FiArrowLeft, FiUserPlus, FiCopy,
+  FiTrash2, FiCornerUpRight, FiX, FiShield 
 } from "react-icons/fi"; 
 import { BsCheck2All, BsBookmarkStarFill, BsCircle, BsCheckCircleFill } from "react-icons/bs"; 
 import Login from "./Login"; 
@@ -39,7 +39,7 @@ const ChatInterface = ({ myId, onLogout }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [notifications, setNotifications] = useState([]);
   
-  // --- SELECT / DELETE / FORWARD STATE ---
+  // STATE FOR SELECT / DELETE / FORWARD
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMsgIds, setSelectedMsgIds] = useState([]);
   const [isForwarding, setIsForwarding] = useState(false); 
@@ -106,8 +106,6 @@ const ChatInterface = ({ myId, onLogout }) => {
   };
 
   // 4. ACTION HANDLERS
-
-  // SEND MESSAGE
   const handleSend = async (textToSend = currentMessage, recipient = selectedUser) => {
     if (!textToSend?.trim() || !recipient) return;
     
@@ -138,7 +136,6 @@ const ChatInterface = ({ myId, onLogout }) => {
       } catch(err) { alert("Error adding friend"); }
   };
 
-  // --- SELECTION LOGIC ---
   const toggleSelectionMode = () => {
       setIsSelectionMode(!isSelectionMode);
       setSelectedMsgIds([]);
@@ -146,7 +143,6 @@ const ChatInterface = ({ myId, onLogout }) => {
   };
 
   const handleMessageClick = async (msg) => {
-      // IF SELECTING: Toggle Checkbox
       if (isSelectionMode) {
           if (selectedMsgIds.includes(msg._id)) {
               setSelectedMsgIds(prev => prev.filter(id => id !== msg._id));
@@ -155,18 +151,14 @@ const ChatInterface = ({ myId, onLogout }) => {
           }
           return;
       }
-      
-      // IF NORMAL: Toggle Save
       if(msg._id) {
           setMessages(prev => prev.map(m => m._id === msg._id ? { ...m, isSaved: !m.isSaved } : m));
           await fetch(`http://localhost:3000/messages/toggle/${msg._id}`, { method: "PUT" });
       }
   };
 
-  // --- DELETE LOGIC ---
   const handleDeleteSelected = async () => {
       if(!window.confirm(`Delete ${selectedMsgIds.length} messages?`)) return;
-      
       try {
           await fetch("http://localhost:3000/messages", {
               method: "DELETE", headers: { "Content-Type": "application/json" },
@@ -178,17 +170,14 @@ const ChatInterface = ({ myId, onLogout }) => {
       } catch(e) { console.error("Delete failed", e); }
   };
 
-  // --- FORWARD LOGIC ---
   const initForwarding = () => {
       setIsForwarding(true); 
       alert("Select a contact to forward to");
   };
 
   const handleUserClick = async (user) => {
-      // IF FORWARDING
       if (isForwarding) {
           if(!window.confirm(`Forward ${selectedMsgIds.length} messages to ${user.username}?`)) return;
-          
           for (let msgId of selectedMsgIds) {
               const rawText = decryptedCache[msgId]; 
               if (rawText) await handleSend(rawText, user);
@@ -199,15 +188,12 @@ const ChatInterface = ({ myId, onLogout }) => {
           setSelectedUser(user); 
           return;
       }
-
-      // NORMAL SWITCH CHAT
       setSelectedUser(user);
       setNotifications((prev) => prev.filter((n) => n.senderId !== user.username));
       setIsSelectionMode(false); 
   };
 
-
-  // 6. DECRYPTION
+  // 5. DECRYPTION
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
@@ -221,7 +207,7 @@ const ChatInterface = ({ myId, onLogout }) => {
                       if (key) {
                           const text = await decryptText(key, msg.text);
                           newCache[keyId] = text; 
-                          if(msg._id) newCache[msg._id] = text; // Cache by ID for forwarding
+                          if(msg._id) newCache[msg._id] = text; 
                       }
                   }
               }
@@ -244,6 +230,14 @@ const ChatInterface = ({ myId, onLogout }) => {
       {/* SIDEBAR */}
       <div className={`sidebar ${selectedUser ? "mobile-hidden" : ""}`}>
         <div className="sidebar-header">
+          
+          {/* --- SIDEBAR LOGO --- */}
+          <div className="brand-header">
+            <h1 className="logo-text">MSG</h1>
+            <p className="logo-tagline">Secure. Ephemeral. Private.</p>
+          </div>
+          {/* -------------------- */}
+
           {isForwarding ? (
              <div className="forward-header">
                 <h3>Select Recipient</h3>
@@ -253,14 +247,15 @@ const ChatInterface = ({ myId, onLogout }) => {
             <>
             <div className="my-profile">
                 <div className="avatar">
-                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="avatar" />
-                <span className="online-dot" style={{ background: isConnected ? "#4caf50" : "#ff9800" }}></span>
+                <img 
+                    src={`https://api.dicebear.com/7.x/initials/svg?seed=${myId}&backgroundColor=003344&textColor=00bcd4&fontWeight=700`} 
+                    alt="avatar" 
+                />
+                <span className="online-dot" style={{ background: isConnected ? "#00e676" : "#ff9800" }}></span>
                 </div>
                 <div className="my-info">
                 <h3>{myId}</h3>
-                <div className="copy-code" onClick={() => {navigator.clipboard.writeText(myFriendCode); alert("Copied!")}}>
-                    <span>ID: {myFriendCode}</span> <FiCopy />
-                </div>
+                <div className="status-text">Online</div>
                 </div>
             </div>
             <div className="search-bar">
@@ -281,20 +276,29 @@ const ChatInterface = ({ myId, onLogout }) => {
         </div>
         
         <div className="users-list">
-          {filteredContacts.map((user) => (
+          {filteredContacts.map((user) => {
+              const unreadCount = notifications.filter(n => n.senderId === user.username).length;
+
+              return (
               <div key={user._id} className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`}
                 onClick={() => handleUserClick(user)} >
                 <div className="avatar">
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="avatar" />
+                  <img 
+                    src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.username}&backgroundColor=003344&textColor=00bcd4&fontWeight=700`} 
+                    alt="avatar" 
+                  />
                 </div>
                 <div className="user-info">
-                  <span className="username">{user.username}</span>
-                  {isForwarding && <FiCornerUpRight style={{color: "#0088cc"}} />}
+                  <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%"}}>
+                    <span className="username">{user.username}</span>
+                    {unreadCount > 0 && <div className="badge">{unreadCount}</div>}
+                  </div>
+                  {isForwarding && <FiCornerUpRight style={{color: "#00bcd4", marginTop: "4px"}} />}
                 </div>
               </div>
-          ))}
+          )})}
         </div>
-        <div className="logout-area"><button onClick={onLogout}>Logout</button></div>
+        <div className="logout-area"><button onClick={onLogout}>SECURE LOGOUT</button></div>
       </div>
 
       {/* CHAT AREA */}
@@ -304,7 +308,7 @@ const ChatInterface = ({ myId, onLogout }) => {
             <div className={`chat-header ${isSelectionMode ? "selection-mode" : ""}`}>
               {isSelectionMode ? (
                   <div className="header-left selection-tools" style={{width:"100%", justifyContent:"space-between"}}>
-                      <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
+                      <div style={{display:"flex", alignItems:"center", gap:"10px", color: "white"}}>
                         <FiX className="icon-btn" onClick={toggleSelectionMode} />
                         <span style={{fontWeight:"bold"}}>{selectedMsgIds.length} Selected</span>
                       </div>
@@ -320,15 +324,22 @@ const ChatInterface = ({ myId, onLogout }) => {
               ) : (
                   <>
                     <div className="header-left">
-                        <FiArrowLeft className="back-btn" onClick={() => setSelectedUser(null)} />
-                        <div className="avatar small"><img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedUser.username}`} alt="avatar" /></div>
+                        <FiArrowLeft className="back-btn icon-btn" onClick={() => setSelectedUser(null)} style={{marginRight: "15px"}}/>
+                        <div className="avatar small">
+                            <img 
+                                src={`https://api.dicebear.com/7.x/initials/svg?seed=${selectedUser.username}&backgroundColor=003344&textColor=00bcd4&fontWeight=700`} 
+                                alt="avatar" 
+                            />
+                        </div>
                         <div className="header-info">
                         <h3>{selectedUser.username}</h3>
-                        <span style={{color: "#4caf50", fontSize: "12px"}}>🔒 End-to-End Encrypted</span>
+                        <div style={{display:"flex", alignItems:"center", gap:"5px", fontSize: "11px", color: "#00bcd4"}}>
+                            <FiShield size={10} /> <span>End-to-End Encrypted</span>
+                        </div>
                         </div>
                     </div>
                     <div className="header-icons">
-                        <FiMoreVertical onClick={toggleSelectionMode} title="Select Messages" style={{cursor:"pointer"}}/>
+                        <FiMoreVertical onClick={toggleSelectionMode} title="Select Messages" />
                     </div>
                   </>
               )}
@@ -343,7 +354,7 @@ const ChatInterface = ({ myId, onLogout }) => {
                     <div key={index} className={`message-wrapper ${msg.senderId === myId ? "own" : "friend"} ${isSelectionMode ? "selectable" : ""}`}>
                         {isSelectionMode && (
                             <div className="selection-checkbox" onClick={() => handleMessageClick(msg)}>
-                                {isSelected ? <BsCheckCircleFill color="#0088cc" size={20}/> : <BsCircle color="#ccc" size={20}/>}
+                                {isSelected ? <BsCheckCircleFill color="#00bcd4" size={20}/> : <BsCircle color="#555" size={20}/>}
                             </div>
                         )}
                         <div className={`message-content ${isSelected ? "selected-bubble" : ""}`} 
@@ -353,7 +364,7 @@ const ChatInterface = ({ myId, onLogout }) => {
                             <p>{displayText}</p>
                             <div className="message-meta">
                             <span>{msg.time}</span>
-                            {!isSelectionMode && msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ff9800"}} />}
+                            {!isSelectionMode && msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ffd700"}} />}
                             {!isSelectionMode && msg.senderId === myId && <BsCheck2All className="read-icon" />}
                             </div>
                         </div>
@@ -366,7 +377,7 @@ const ChatInterface = ({ myId, onLogout }) => {
             <div className="chat-input-area">
               <button className="icon-btn"><FiPaperclip /></button>
               <div className="input-wrapper">
-                <input type="text" placeholder="Message..." value={currentMessage}
+                <input type="text" placeholder="Type a secured message..." value={currentMessage}
                   onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} 
                   disabled={isSelectionMode} 
                 />
@@ -375,9 +386,50 @@ const ChatInterface = ({ myId, onLogout }) => {
             </div>
           </>
         ) : (
+          /* --- MODIFIED: NO CHAT SCREEN WITH LOGO & NEW ID LOGIC --- */
           <div className="no-chat">
-             <h3>Welcome {myId}!</h3>
-             <p>Your Friend ID: <b>{myFriendCode}</b></p>
+              
+              {/* 1. Centered Large Logo (Replaces Shield) */}
+              <div className="center-brand">
+                  <h1 className="logo-text large">MSG</h1>
+                  <p className="logo-tagline">Secure. Ephemeral. Private.</p>
+              </div>
+              
+              <h1>Welcome, {myId}!</h1>
+              
+              {/* 2. Updated ID Logic: Instruction Label + Click to Copy ONLY ID */}
+              <p className="id-instruction">Click to copy your unique ID</p>
+              
+              <div 
+                className="welcome-id-pill" 
+                onClick={() => {
+                   navigator.clipboard.writeText(myFriendCode); 
+                   alert("ID Copied!");
+                }}
+                title="Click to copy ID"
+              >
+                  <span className="highlight-id">{myFriendCode}</span> <FiCopy style={{marginLeft: "10px"}}/>
+              </div>
+
+              {/* Security Cards Grid */}
+              <div className="security-grid">
+                <div className="security-card encryption">
+                  <div className="card-icon">🔒</div>
+                  <h4>Client-Side Encryption</h4>
+                  <p>Encryption happens locally. Even if our servers are breached, messages remain unreadable.</p>
+                </div>
+                <div className="security-card timer">
+                  <div className="card-icon">⏳</div>
+                  <h4>48h Strict Auto-Delete</h4>
+                  <p>Data is permanently wiped after 48 hours. No logs, no backups, no traces left behind.</p>
+                </div>
+                <div className="security-card shield">
+                  <div className="card-icon">🛡️</div>
+                  <h4>Zero-Knowledge</h4>
+                  <p>Private keys never leave your browser. We have mathematically zero access to your chats.</p>
+                </div>
+              </div>
+
           </div>
         )}
       </div>
