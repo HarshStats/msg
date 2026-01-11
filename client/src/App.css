@@ -81,12 +81,13 @@ body {
   flex-shrink: 0;
 }
 
-.brand-container { display: flex; flex-direction: column; }
-.logo-text { font-family: 'Courier New', monospace; font-size: 1.8rem; font-weight: 900; margin: 0; color: var(--primary-color); letter-spacing: -2px; text-shadow: 0 0 10px rgba(0, 188, 212, 0.5); }
+.brand-container { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.logo-text { font-family: 'Courier New', monospace; font-size: 1.8rem; font-weight: 900; margin: 0; line-height: 1; color: var(--primary-color); letter-spacing: -2px; text-shadow: 0 0 10px rgba(0, 188, 212, 0.5); }
 .light-theme .logo-text { text-shadow: none; }
-.logo-tagline { font-size: 0.65rem; color: var(--text-secondary); letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
+.logo-tagline { font-size: 0.65rem; color: var(--text-secondary); letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; margin-top: 4px; }
 .mini-profile { display: flex; align-items: center; gap: 10px; }
-.mini-avatar { width: 35px; height: 35px; border-radius: 50%; border: 2px solid var(--primary-color); }
+.mini-avatar { width: 35px; height: 35px; border-radius: 50%; border: 2px solid var(--primary-color); overflow: hidden; }
+.mini-avatar img { width: 100%; height: 100%; object-fit: cover; border: none; }
 .mini-status { width: 10px; height: 10px; background: var(--success-color); border-radius: 50%; box-shadow: 0 0 5px var(--success-color); }
 
 /* 2. SIDEBAR TOOLS */
@@ -98,6 +99,10 @@ body {
 .light-theme .search-bar:focus-within { background: #ffffff; }
 .search-bar input { border: none; background: transparent; margin-left: 10px; outline: none; width: 100%; font-size: 14px; color: var(--text-primary); }
 .search-icon { color: var(--text-secondary); font-size: 16px; }
+
+.my-id-display { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text-secondary); transition: all 0.3s; }
+.my-id-display:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--primary-color); color: var(--text-primary); }
+.light-theme .my-id-display { background: rgba(0,0,0,0.05); border-color: transparent; }
 
 .add-friend-btn { width: 100%; padding: 8px; background: rgba(0, 188, 212, 0.1); color: var(--primary-color); border: 1px solid rgba(0, 188, 212, 0.3); border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; font-size: 13px; transition: all 0.3s; }
 .light-theme .add-friend-btn { background: #e0f7fa; border-color: transparent; }
@@ -112,7 +117,14 @@ body {
 .user-card:hover { background: var(--card-hover); }
 .light-theme .user-card.active { background: #e8f0fe; border-left: 3px solid var(--primary-color); }
 .user-card.active { background: rgba(0, 188, 212, 0.1); border-left: 3px solid var(--primary-color); }
-.avatar img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(0, 188, 212, 0.5); }
+
+/* UPDATED AVATAR STYLING */
+.avatar { display: block; position: relative; flex-shrink: 0; }
+.avatar img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(0, 188, 212, 0.5); display: block; }
+/* Force override for mini-avatar to ensure it fits perfectly */
+.mini-avatar { width: 35px; height: 35px; border-radius: 50%; border: 2px solid var(--primary-color); overflow: hidden; padding: 0; }
+.mini-avatar img { width: 100% !important; height: 100% !important; border: none; object-fit: cover; }
+
 .user-info { margin-left: 15px; flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .username { font-weight: 600; font-size: 15px; color: var(--text-primary); }
 .badge { background: #ff0055; color: white; font-size: 11px; font-weight: bold; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }

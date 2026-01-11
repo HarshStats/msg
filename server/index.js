@@ -116,13 +116,13 @@ app.post("/add-contact", async (req, res) => {
         if (friend.username === myId) return res.status(400).json("You cannot add yourself");
 
         const me = await User.findOne({ username: myId });
-        
+
         // Add friend to my list
         if (!me.contacts.includes(friend.username)) {
             me.contacts.push(friend.username);
             await me.save();
         }
-        
+
         // Add me to friend's list
         if (!friend.contacts.includes(myId)) {
             friend.contacts.push(myId);

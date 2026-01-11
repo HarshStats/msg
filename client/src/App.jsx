@@ -14,7 +14,6 @@ import "./App.css";
 
 // 🚀 LIVE SERVER URL (Render)
 const SERVER_URL = "https://msg-p0th.onrender.com"; 
-
 // 🔊 SOUNDS
 const NOTIFICATION_SOUND = "https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3";
 const RINGTONE_SOUND = "https://codeskulptor-demos.commondatastorage.googleapis.com/Galaxy/music/theme_01.mp3"; 
@@ -126,7 +125,8 @@ const ChatInterface = ({ myId, onLogout }) => {
   const getAvatar = (seed) => {
       const bg = theme === 'dark' ? '003344' : 'e0f7fa';
       const text = theme === 'dark' ? '00bcd4' : '006064';
-      return `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=${bg}&textColor=${text}&fontWeight=700`;
+      // Added fontSize=45 to ensure text fits better inside the circle without checking the edges
+      return `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=${bg}&textColor=${text}&fontSize=45&fontWeight=700`;
   };
 
   // Handle Resize for Mobile View
@@ -485,6 +485,13 @@ const ChatInterface = ({ myId, onLogout }) => {
         ) : (
             <div className="sidebar-tools">
                 <div className="search-bar"><FiSearch className="search-icon" /><input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+                
+                {/* NEW: MY ID DISPLAY FOR MOBILE/DESKTOP */}
+                <div className="my-id-display" onClick={() => { navigator.clipboard.writeText(myFriendCode); alert("ID Copied!"); }} title="Click to copy My ID">
+                    <span>My ID: <span style={{fontWeight:"bold", color: "var(--primary-color)"}}>{myFriendCode}</span></span>
+                    <FiCopy />
+                </div>
+
                 <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}><FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}</button>
                 {showAddFriend && (<div className="add-friend-box"><input placeholder="Friend ID" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} /><button onClick={handleAddFriend}>Add</button></div>)}
             </div>
