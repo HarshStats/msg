@@ -1,33 +1,30 @@
 import { useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
+import Peer from "simple-peer"; 
 import { 
   FiSearch, FiPaperclip, FiSend, FiMoreVertical, 
   FiArrowLeft, FiUserPlus, FiCopy,
-  FiTrash2, FiCornerUpRight, FiX, FiShield, FiImage, FiDownload, FiAlertTriangle 
+  FiTrash2, FiCornerUpRight, FiX, FiShield, FiImage, FiDownload, FiAlertTriangle,
+  FiPhone, FiVideo, FiMic, FiMicOff, FiVideoOff 
 } from "react-icons/fi"; 
-import { BsCheck2All, BsBookmarkStarFill, BsCircle, BsCheckCircleFill } from "react-icons/bs"; 
+import { BsCheck2All, BsBookmarkStarFill, BsCircle, BsCheckCircleFill, BsTelephoneFill, BsTelephoneXFill } from "react-icons/bs"; 
 import Login from "./Login"; 
 import { deriveSharedKey, encryptText, decryptText } from "./crypto"; 
 import "./App.css";
 
-// SOUND
-const playNotificationSound = () => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return; 
-    const ctx = new AudioContext();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.type = "sine"; 
-    oscillator.frequency.setValueAtTime(880, ctx.currentTime); 
-    oscillator.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 1.5);
-    gainNode.gain.setValueAtTime(0.3, ctx.currentTime); 
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5); 
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 1.5); 
-  } catch (err) { console.error("Audio play failed:", err); }
+// 🚀 LIVE SERVER URL (Render)
+const SERVER_URL = "https://msg-p0th.onrender.com"; 
+
+// SOUNDS
+const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2346/2346-preview.mp3";
+const RINGTONE_SOUND = "https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3"; 
+
+const playSound = (url, loop = false) => {
+  const audio = new Audio(url);
+  if(loop) audio.loop = true;
+  audio.volume = 0.5;
+  audio.play().catch(e => console.error("Audio blocked", e));
+  return audio;
 };
 
 // COMPRESSION
@@ -83,7 +80,7 @@ const ChatInterface = ({ myId, onLogout }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [notifications, setNotifications] = useState([]);
   
-  // States
+  // MAIN STATES
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMsgIds, setSelectedMsgIds] = useState([]);
   const [isForwarding, setIsForwarding] = useState(false); 
@@ -95,30 +92,194 @@ const ChatInterface = ({ myId, onLogout }) => {
   const [friendCodeInput, setFriendCodeInput] = useState("");
   const myFriendCode = localStorage.getItem("my_friend_code") || "Loading...";
 
+  // CALLING STATES
+  const [stream, setStream] = useState(null);
+  const [receivingCall, setReceivingCall] = useState(false);
+  const [caller, setCaller] = useState("");
+  const [callerSignal, setCallerSignal] = useState();
+  const [callAccepted, setCallAccepted] = useState(false);
+  const [callEnded, setCallEnded] = useState(false);
+  const [isCalling, setIsCalling] = useState(false); 
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+
   const [decryptedCache, setDecryptedCache] = useState({});
   const sharedKeysCache = useRef({}); 
   const scrollRef = useRef();
   const selectedUserRef = useRef(null);
   const fileInputRef = useRef(null); 
+  
+  const myVideo = useRef();
+  const userVideo = useRef();
+  const connectionRef = useRef();
+  const ringtoneRef = useRef(null); 
 
   useEffect(() => { selectedUserRef.current = selectedUser; setNukeCount(0); }, [selectedUser]);
-  
-  const toggleTheme = () => {
-      setTheme(prev => prev === "dark" ? "light" : "dark");
-  };
-
-  // --- NEW: DYNAMIC AVATAR HELPER ---
+  const toggleTheme = () => setTheme(prev => prev === "dark" ? "light" : "dark");
   const getAvatar = (seed) => {
-      // If Dark Mode: Dark Blue Background, Neon Cyan Text
-      // If Light Mode: Very Light Cyan Background, Dark Teal Text
       const bg = theme === 'dark' ? '003344' : 'e0f7fa';
       const text = theme === 'dark' ? '00bcd4' : '006064';
       return `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=${bg}&textColor=${text}&fontWeight=700`;
   };
 
+  // --- 1. SETUP SOCKET ---
+  useEffect(() => {
+    // Connect to Render Backend
+    const newSocket = io(SERVER_URL, { transports: ['websocket'] });
+    setSocket(newSocket);
+
+    newSocket.on("connect", () => { 
+        setIsConnected(true); 
+        newSocket.emit("addNewUser", myId); 
+    });
+
+    newSocket.on("getOnlineUsers", (users) => setOnlineUsers(users));
+    
+    // Call Signals
+    newSocket.on("callUser", (data) => {
+        setReceivingCall(true);
+        setCaller(data.from);
+        setCallerSignal(data.signal);
+        try { ringtoneRef.current = playSound(RINGTONE_SOUND, true); } catch(e) {}
+    });
+
+    newSocket.on("callAccepted", (signal) => {
+        setCallAccepted(true);
+        if(connectionRef.current) connectionRef.current.signal(signal);
+    });
+
+    newSocket.on("callFailed", (data) => {
+        alert(`❌ Call Failed: ${data.reason}`);
+        endCallUI();
+    });
+
+    newSocket.on("callEnded", () => {
+        endCallUI();
+    });
+
+    newSocket.on("getMessage", (message) => {
+      setMessages((prev) => [...prev, message]);
+      if (message.senderId !== myId) playSound(NOTIFICATION_SOUND); 
+      if (selectedUserRef.current?.username !== message.senderId) setNotifications((prev) => [message, ...prev]);
+    });
+
+    newSocket.on("chatNuked", ({ target }) => {
+        if (target === myId || target === selectedUserRef.current?.username) setMessages(prev => prev.filter(m => m.isSaved));
+    });
+
+    return () => newSocket.disconnect();
+  }, [myId]);
+
+  // --- 2. CALL FUNCTIONS ---
+  const startStream = async () => {
+      try {
+          const currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          setStream(currentStream);
+          if (myVideo.current) myVideo.current.srcObject = currentStream;
+          return currentStream;
+      } catch (err) {
+          alert("Could not access Camera/Microphone.");
+          return null;
+      }
+  };
+
+  const callUser = async () => {
+      const streamData = await startStream();
+      if(!streamData) return;
+
+      setIsCalling(true);
+      
+      try {
+          const peer = new Peer({ initiator: true, trickle: false, stream: streamData });
+
+          peer.on("signal", (data) => {
+              socket.emit("callUser", {
+                  userToCall: selectedUser.username,
+                  signalData: data,
+                  from: myId,
+                  name: myId
+              });
+          });
+
+          peer.on("stream", (remoteStream) => {
+              if (userVideo.current) userVideo.current.srcObject = remoteStream;
+          });
+
+          peer.on("error", (err) => {
+              console.error("Peer Error:", err);
+              endCallUI();
+          });
+
+          socket.on("callAccepted", (signal) => {
+              setCallAccepted(true);
+              peer.signal(signal);
+          });
+
+          connectionRef.current = peer;
+
+      } catch (err) {
+          alert("Call System Error: " + err.message);
+          endCallUI();
+      }
+  };
+
+  const answerCall = async () => {
+      setCallAccepted(true);
+      if(ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; } 
+
+      const streamData = await startStream();
+      if(!streamData) return;
+
+      const peer = new Peer({ initiator: false, trickle: false, stream: streamData });
+
+      peer.on("signal", (data) => {
+          socket.emit("answerCall", { signal: data, to: caller });
+      });
+
+      peer.on("stream", (remoteStream) => {
+          if (userVideo.current) userVideo.current.srcObject = remoteStream;
+      });
+
+      peer.signal(callerSignal);
+      connectionRef.current = peer;
+  };
+
+  const leaveCall = () => {
+      setCallEnded(true);
+      if (connectionRef.current) connectionRef.current.destroy();
+      const target = receivingCall ? caller : selectedUser?.username;
+      socket.emit("endCall", { to: target });
+      endCallUI();
+  };
+
+  const endCallUI = () => {
+      if(ringtoneRef.current) { ringtoneRef.current.pause(); ringtoneRef.current = null; }
+      if(stream) stream.getTracks().forEach(track => track.stop()); 
+      setCallAccepted(false);
+      setReceivingCall(false);
+      setIsCalling(false);
+      setStream(null);
+      window.location.reload(); 
+  };
+
+  const toggleMute = () => {
+      if(stream) {
+          stream.getAudioTracks()[0].enabled = !stream.getAudioTracks()[0].enabled;
+          setIsMuted(!stream.getAudioTracks()[0].enabled);
+      }
+  }
+
+  const toggleVideo = () => {
+      if(stream) {
+          stream.getVideoTracks()[0].enabled = !stream.getVideoTracks()[0].enabled;
+          setIsVideoOff(!stream.getVideoTracks()[0].enabled);
+      }
+  }
+
+  // --- 3. FETCH LOGIC (Uses SERVER_URL) ---
   const fetchContacts = async () => {
       try {
-        const res = await fetch(`http://localhost:3000/contacts/${myId}`);
+        const res = await fetch(`${SERVER_URL}/contacts/${myId}`);
         const data = await res.json();
         setContacts(data || []);
       } catch (err) { console.error(err); }
@@ -128,36 +289,12 @@ const ChatInterface = ({ myId, onLogout }) => {
     fetchContacts();
     const fetchMsgs = async () => {
         try {
-            const res = await fetch(`http://localhost:3000/messages/${myId}`);
+            const res = await fetch(`${SERVER_URL}/messages/${myId}`);
             const data = await res.json();
             setMessages(data);
         } catch(e) {}
     };
     fetchMsgs();
-  }, [myId]);
-
-  useEffect(() => {
-    const newSocket = io("http://localhost:3000");
-    setSocket(newSocket);
-    newSocket.on("connect", () => { setIsConnected(true); newSocket.emit("addNewUser", myId); });
-    newSocket.on("disconnect", () => setIsConnected(false));
-    newSocket.on("getOnlineUsers", (users) => setOnlineUsers(users));
-    
-    newSocket.on("getMessage", (message) => {
-      setMessages((prev) => [...prev, message]);
-      if (message.senderId !== myId) playNotificationSound(); 
-      if (selectedUserRef.current?.username !== message.senderId) {
-        setNotifications((prev) => [message, ...prev]);
-      }
-    });
-
-    newSocket.on("chatNuked", ({ target }) => {
-        if (target === myId || target === selectedUserRef.current?.username) {
-            setMessages(prev => prev.filter(m => m.isSaved));
-        }
-    });
-
-    return () => newSocket.disconnect();
   }, [myId]);
 
   const getSharedKey = async (otherUser) => {
@@ -183,7 +320,6 @@ const ChatInterface = ({ myId, onLogout }) => {
   };
 
   const handleFileClick = () => fileInputRef.current.click();
-
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -198,7 +334,7 @@ const ChatInterface = ({ myId, onLogout }) => {
   const handleAddFriend = async () => {
       if(!friendCodeInput) return;
       try {
-          const res = await fetch("http://localhost:3000/add-contact", {
+          const res = await fetch(`${SERVER_URL}/add-contact`, {
               method: "POST", headers: {"Content-Type": "application/json"},
               body: JSON.stringify({ myId, friendCode: friendCodeInput })
           });
@@ -212,7 +348,7 @@ const ChatInterface = ({ myId, onLogout }) => {
           setTimeout(() => setNukeCount(0), 3000); 
       } else {
           try {
-              await fetch("http://localhost:3000/messages/nuke", {
+              await fetch(`${SERVER_URL}/messages/nuke`, {
                   method: "DELETE", headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ myId, otherId: selectedUser.username })
               });
@@ -224,7 +360,6 @@ const ChatInterface = ({ myId, onLogout }) => {
   };
 
   const toggleSelectionMode = () => { setIsSelectionMode(!isSelectionMode); setSelectedMsgIds([]); setIsForwarding(false); };
-
   const handleMessageClick = async (msg) => {
       if (isSelectionMode) {
           if (selectedMsgIds.includes(msg._id)) setSelectedMsgIds(prev => prev.filter(id => id !== msg._id));
@@ -233,14 +368,13 @@ const ChatInterface = ({ myId, onLogout }) => {
       }
       if(msg._id) {
           setMessages(prev => prev.map(m => m._id === msg._id ? { ...m, isSaved: !m.isSaved } : m));
-          await fetch(`http://localhost:3000/messages/toggle/${msg._id}`, { method: "PUT" });
+          await fetch(`${SERVER_URL}/messages/toggle/${msg._id}`, { method: "PUT" });
       }
   };
-
   const handleDeleteSelected = async () => {
       if(!window.confirm(`Delete ${selectedMsgIds.length} messages?`)) return;
       try {
-          await fetch("http://localhost:3000/messages", {
+          await fetch(`${SERVER_URL}/messages`, {
               method: "DELETE", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ ids: selectedMsgIds })
           });
@@ -248,9 +382,7 @@ const ChatInterface = ({ myId, onLogout }) => {
           setIsSelectionMode(false); setSelectedMsgIds([]);
       } catch(e) { console.error("Delete failed", e); }
   };
-
   const initForwarding = () => { setIsForwarding(true); alert("Select a contact to forward to"); };
-
   const handleUserClick = async (user) => {
       if (isForwarding) {
           if(!window.confirm(`Forward ${selectedMsgIds.length} messages to ${user.username}?`)) return;
@@ -296,62 +428,37 @@ const ChatInterface = ({ myId, onLogout }) => {
       (msg.senderId === selectedUser?.username && msg.recipientId === myId)
   );
   
-  useEffect(() => { 
-      if (!isSelectionMode) scrollRef.current?.scrollIntoView({ behavior: "smooth" }); 
-  }, [currentChatMessages.length, selectedUser?.username, isSelectionMode]);
+  useEffect(() => { if (!isSelectionMode) scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [currentChatMessages.length, selectedUser?.username, isSelectionMode]);
 
   return (
     <div className={`app-container ${theme === "light" ? "light-theme" : ""}`}>
       {/* SIDEBAR */}
       <div className={`sidebar ${selectedUser ? "mobile-hidden" : ""}`}>
-        
         <div className="sidebar-header">
           <div className="brand-container" onClick={toggleTheme} style={{cursor: "pointer"}} title="Toggle Theme">
             <h1 className="logo-text">MSG</h1>
-            <p className="logo-tagline">Secure. Ephemeral. Private.</p>
+            <p className="logo-tagline">Secure. Ephemeral.</p>
           </div>
           <div className="mini-profile">
-             <div className="avatar mini-avatar">
-                {/* Updated: Use dynamic getAvatar */}
-                <img src={getAvatar(myId)} alt="Me" />
-             </div>
+             <div className="avatar mini-avatar"><img src={getAvatar(myId)} alt="Me" /></div>
              <span className="online-dot mini-status"></span>
           </div>
         </div>
-
         {isForwarding ? (
-             <div className="forward-header">
-                <h3>Select Recipient</h3>
-                <button onClick={() => {setIsForwarding(false); setIsSelectionMode(false)}}>Cancel</button>
-             </div>
+             <div className="forward-header"><h3>Select Recipient</h3><button onClick={() => {setIsForwarding(false); setIsSelectionMode(false)}}>Cancel</button></div>
         ) : (
             <div className="sidebar-tools">
-                <div className="search-bar">
-                    <FiSearch className="search-icon" />
-                    <input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                </div>
-                <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}>
-                    <FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}
-                </button>
-                {showAddFriend && (
-                    <div className="add-friend-box">
-                        <input placeholder="Friend ID" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} />
-                        <button onClick={handleAddFriend}>Add</button>
-                    </div>
-                )}
+                <div className="search-bar"><FiSearch className="search-icon" /><input type="text" placeholder="Search friends" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+                <button className="add-friend-btn" onClick={() => setShowAddFriend(!showAddFriend)}><FiUserPlus /> {showAddFriend ? "Close" : "Add Friend"}</button>
+                {showAddFriend && (<div className="add-friend-box"><input placeholder="Friend ID" value={friendCodeInput} onChange={e => setFriendCodeInput(e.target.value)} /><button onClick={handleAddFriend}>Add</button></div>)}
             </div>
         )}
-        
         <div className="users-list">
           {filteredContacts.map((user) => {
               const unreadCount = notifications.filter(n => n.senderId === user.username).length;
               return (
-              <div key={user._id} className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`}
-                onClick={() => handleUserClick(user)} >
-                <div className="avatar">
-                  {/* Updated: Use dynamic getAvatar */}
-                  <img src={getAvatar(user.username)} alt="avatar" />
-                </div>
+              <div key={user._id} className={`user-card ${selectedUser?.username === user.username ? "active" : ""}`} onClick={() => handleUserClick(user)} >
+                <div className="avatar"><img src={getAvatar(user.username)} alt="avatar" /></div>
                 <div className="user-info">
                   <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%"}}>
                     <span className="username">{user.username}</span>
@@ -362,7 +469,6 @@ const ChatInterface = ({ myId, onLogout }) => {
               </div>
           )})}
         </div>
-
         <div className="logout-area"><button onClick={onLogout}>SECURE LOGOUT</button></div>
       </div>
 
@@ -373,44 +479,19 @@ const ChatInterface = ({ myId, onLogout }) => {
             <div className={`chat-header ${isSelectionMode ? "selection-mode" : ""}`}>
               {isSelectionMode ? (
                   <div className="header-left selection-tools" style={{width:"100%", justifyContent:"space-between"}}>
-                      <div style={{display:"flex", alignItems:"center", gap:"10px", color: "white"}}>
-                        <FiX className="icon-btn" onClick={toggleSelectionMode} />
-                        <span style={{fontWeight:"bold"}}>{selectedMsgIds.length} Selected</span>
-                      </div>
-                      <div style={{display:"flex", gap:"20px"}}>
-                          {selectedMsgIds.length > 0 && (
-                              <>
-                                <FiTrash2 className="icon-btn" onClick={handleDeleteSelected} title="Delete" />
-                                <FiCornerUpRight className="icon-btn" onClick={initForwarding} title="Forward" />
-                              </>
-                          )}
-                      </div>
+                      <div style={{display:"flex", alignItems:"center", gap:"10px", color: "white"}}><FiX className="icon-btn" onClick={toggleSelectionMode} /><span style={{fontWeight:"bold"}}>{selectedMsgIds.length} Selected</span></div>
+                      <div style={{display:"flex", gap:"20px"}}>{selectedMsgIds.length > 0 && (<><FiTrash2 className="icon-btn" onClick={handleDeleteSelected} title="Delete" /><FiCornerUpRight className="icon-btn" onClick={initForwarding} title="Forward" /></>)}</div>
                   </div>
               ) : (
                   <>
                     <div className="header-left">
                         <FiArrowLeft className="back-btn icon-btn" onClick={() => setSelectedUser(null)} style={{marginRight: "15px"}}/>
-                        <div className="avatar small">
-                            {/* Updated: Use dynamic getAvatar */}
-                            <img src={getAvatar(selectedUser.username)} alt="avatar" />
-                        </div>
-                        <div className="header-info">
-                        <h3>{selectedUser.username}</h3>
-                        <div style={{display:"flex", alignItems:"center", gap:"5px", fontSize: "11px", color: "#00bcd4"}}>
-                            <FiShield size={10} /> <span>End-to-End Encrypted</span>
-                        </div>
-                        </div>
+                        <div className="avatar small"><img src={getAvatar(selectedUser.username)} alt="avatar" /></div>
+                        <div className="header-info"><h3>{selectedUser.username}</h3><div style={{display:"flex", alignItems:"center", gap:"5px", fontSize: "11px", color: "#00bcd4"}}><FiShield size={10} /> <span>End-to-End Encrypted</span></div></div>
                     </div>
-                    
                     <div className="header-icons">
-                        <div 
-                            className={`nuke-btn ${nukeCount > 0 ? "active" : ""}`} 
-                            onClick={handleNuke}
-                            title={nukeCount === 0 ? "Nuke Chat" : `${3 - nukeCount} clicks to NUKE`}
-                        >
-                            <FiAlertTriangle />
-                            {nukeCount > 0 && <span className="nuke-badge">{3 - nukeCount}</span>}
-                        </div>
+                        <div className="icon-btn" onClick={callUser} title="Start Call"><FiVideo /></div>
+                        <div className={`nuke-btn ${nukeCount > 0 ? "active" : ""}`} onClick={handleNuke} title="Nuke Chat"><FiAlertTriangle />{nukeCount > 0 && <span className="nuke-badge">{3 - nukeCount}</span>}</div>
                         <FiMoreVertical onClick={toggleSelectionMode} title="Select Messages" />
                     </div>
                   </>
@@ -422,27 +503,12 @@ const ChatInterface = ({ myId, onLogout }) => {
                 const decryptedContent = decryptedCache[msg._id || msg.time];
                 const isSelected = selectedMsgIds.includes(msg._id);
                 const isImage = msg.type === "image" || (typeof decryptedContent === 'string' && decryptedContent.startsWith("data:image"));
-                
                 return (
                     <div key={index} className={`message-wrapper ${msg.senderId === myId ? "own" : "friend"} ${isSelectionMode ? "selectable" : ""}`}>
-                        {isSelectionMode && (
-                            <div className="selection-checkbox" onClick={() => handleMessageClick(msg)}>
-                                {isSelected ? <BsCheckCircleFill color="#00bcd4" size={20}/> : <BsCircle color="#555" size={20}/>}
-                            </div>
-                        )}
-                        <div className={`message-content ${isSelected ? "selected-bubble" : ""}`} 
-                             onClick={() => handleMessageClick(msg)}
-                             style={{cursor: isSelectionMode ? "pointer" : "default"}}
-                        >
-                            {!decryptedContent ? <p style={{fontStyle:"italic", opacity:0.7}}>🔒 Decrypting...</p> : 
-                             isImage ? <img src={decryptedContent} alt="Encrypted attachment" className="chat-image" onClick={(e) => { e.stopPropagation(); setViewingImage(decryptedContent); }} /> : 
-                             <p>{decryptedContent}</p>}
-                            
-                            <div className="message-meta">
-                            <span>{msg.time}</span>
-                            {!isSelectionMode && msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ffd700"}} />}
-                            {!isSelectionMode && msg.senderId === myId && <BsCheck2All className="read-icon" />}
-                            </div>
+                        {isSelectionMode && (<div className="selection-checkbox" onClick={() => handleMessageClick(msg)}>{isSelected ? <BsCheckCircleFill color="#00bcd4" size={20}/> : <BsCircle color="#555" size={20}/>}</div>)}
+                        <div className={`message-content ${isSelected ? "selected-bubble" : ""}`} onClick={() => handleMessageClick(msg)} style={{cursor: isSelectionMode ? "pointer" : "default"}}>
+                            {!decryptedContent ? <p style={{fontStyle:"italic", opacity:0.7}}>🔒 Decrypting...</p> : isImage ? <img src={decryptedContent} alt="Encrypted attachment" className="chat-image" onClick={(e) => { e.stopPropagation(); setViewingImage(decryptedContent); }} /> : <p>{decryptedContent}</p>}
+                            <div className="message-meta"><span>{msg.time}</span>{!isSelectionMode && msg.isSaved && <BsBookmarkStarFill style={{marginLeft: "5px", color: "#ffd700"}} />}{!isSelectionMode && msg.senderId === myId && <BsCheck2All className="read-icon" />}</div>
                         </div>
                     </div>
                 );
@@ -453,12 +519,7 @@ const ChatInterface = ({ myId, onLogout }) => {
             <div className="chat-input-area">
               <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" style={{display: "none"}} />
               <button className="icon-btn" onClick={handleFileClick} title="Send Image"><FiPaperclip /></button>
-              <div className="input-wrapper">
-                <input type="text" placeholder="Type a secured message..." value={currentMessage}
-                  onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} 
-                  disabled={isSelectionMode} 
-                />
-              </div>
+              <div className="input-wrapper"><input type="text" placeholder="Type a secured message..." value={currentMessage} onChange={(e) => setCurrentMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} disabled={isSelectionMode} /></div>
               <button className="send-btn" onClick={() => handleSend(currentMessage, "text")} disabled={isSelectionMode}><FiSend /></button>
             </div>
           </>
@@ -467,9 +528,7 @@ const ChatInterface = ({ myId, onLogout }) => {
               <div className="center-brand"><h1 className="logo-text large">MSG</h1><p className="logo-tagline">Secure. Ephemeral. Private.</p></div>
               <h1>Welcome, {myId}!</h1>
               <p className="id-instruction">Click to copy your unique ID</p>
-              <div className="welcome-id-pill" onClick={() => { navigator.clipboard.writeText(myFriendCode); alert("ID Copied!"); }} title="Click to copy ID">
-                  <span className="highlight-id">{myFriendCode}</span> <FiCopy style={{marginLeft: "10px"}}/>
-              </div>
+              <div className="welcome-id-pill" onClick={() => { navigator.clipboard.writeText(myFriendCode); alert("ID Copied!"); }} title="Click to copy ID"><span className="highlight-id">{myFriendCode}</span> <FiCopy style={{marginLeft: "10px"}}/></div>
               <div className="security-grid">
                 <div className="security-card encryption"><div className="card-icon">🔒</div><h4>Client-Side Encryption</h4><p>Encryption happens locally. Even if our servers are breached, messages remain unreadable.</p></div>
                 <div className="security-card timer"><div className="card-icon">⏳</div><h4>48h Strict Auto-Delete</h4><p>Data is permanently wiped after 48 hours. No logs, no backups, no traces left behind.</p></div>
@@ -479,14 +538,45 @@ const ChatInterface = ({ myId, onLogout }) => {
         )}
       </div>
 
+      {/* CALL OVERLAY + WATERMARK */}
+      {(receivingCall || isCalling || callAccepted) && !callEnded && (
+          <div className="call-overlay">
+              <div className="call-box">
+                  <div className="video-watermark">
+                        Confidential &nbsp; • &nbsp; {myId} &nbsp; • &nbsp; {new Date().toLocaleTimeString()}
+                        <br/>
+                        {myId} &nbsp; • &nbsp; DO NOT SHARE
+                  </div>
+                  {receivingCall && !callAccepted ? (
+                      <div className="incoming-call">
+                          <h3>Incoming Call from {caller}...</h3>
+                          <div className="call-actions">
+                              <button className="call-btn accept" onClick={answerCall}><BsTelephoneFill /> Answer</button>
+                              <button className="call-btn reject" onClick={() => { leaveCall(); window.location.reload(); }}><BsTelephoneXFill /> Reject</button>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="active-call">
+                          <div className="video-grid">
+                              <video playsInline muted ref={myVideo} autoPlay className="my-video" />
+                              {callAccepted && !callEnded && <video playsInline ref={userVideo} autoPlay className="user-video" />}
+                          </div>
+                          <div className="call-controls">
+                              <button className="control-btn" onClick={toggleMute}>{isMuted ? <FiMicOff /> : <FiMic />}</button>
+                              <button className="control-btn" onClick={toggleVideo}>{isVideoOff ? <FiVideoOff /> : <FiVideo />}</button>
+                              <button className="control-btn hangup" onClick={leaveCall}><BsTelephoneXFill /></button>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
       {viewingImage && (
         <div className="lightbox-overlay" onClick={() => setViewingImage(null)}>
           <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
             <img src={viewingImage} alt="Full view" className="lightbox-img" />
-            <div className="lightbox-controls">
-                <button className="lightbox-btn" onClick={() => setViewingImage(null)}><FiX /> Close</button>
-                <a href={viewingImage} download={`secure-image-${Date.now()}.png`} className="lightbox-btn"><FiDownload /> Download</a>
-            </div>
+            <div className="lightbox-controls"><button className="lightbox-btn" onClick={() => setViewingImage(null)}><FiX /> Close</button><a href={viewingImage} download={`secure-image-${Date.now()}.png`} className="lightbox-btn"><FiDownload /> Download</a></div>
           </div>
         </div>
       )}

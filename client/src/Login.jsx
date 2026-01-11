@@ -1,91 +1,86 @@
 import { useState } from "react";
-import "./App.css"; 
-import { generateKeyPair } from "./crypto"; // Import the new security helper
+import { generateKeys } from "./crypto"; 
+
+// 🚀 LIVE SERVER URL (Render)
+const SERVER_URL = "https://msg-p0th.onrender.com";
 
 const Login = ({ onLogin }) => {
-  const [isRegister, setIsRegister] = useState(false);
+  // ... (Keep the rest of the file EXACTLY the same)
+  const [isRegistering, setIsRegistering] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-const handleSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setLoading(true);
     setError(null);
 
-    const endpoint = isRegister ? "register" : "login";
-    let payload = { username, password };
-
-    // --- REGISTER LOGIC ---
-    if (isRegister) {
-        try {
-            const keys = await generateKeyPair();
-            // Save locally for immediate use
-            localStorage.setItem(`priv_${username}`, JSON.stringify(keys.privateKey));
-            
-            // Send BOTH keys to server
-            payload.publicKey = keys.publicKey;
-            payload.privateKey = keys.privateKey; // NEW: Send backup
-        } catch (err) {
-            setError("Security setup failed."); return;
-        }
-    }
-
     try {
-      const res = await fetch(`http://localhost:3000/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        if (data.friendCode) localStorage.setItem("my_friend_code", data.friendCode);
+      if (isRegistering) {
+        const { publicKey, privateKey } = await generateKeys();
         
-        // --- LOGIN LOGIC (NEW) ---
-        // If server sent back a private key (Login), save it!
-        if (data.privateKey) {
-            localStorage.setItem(`priv_${data.username}`, JSON.stringify(data.privateKey));
-        }
+        const res = await fetch(`${SERVER_URL}/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            username, 
+            password, 
+            publicKey: JSON.stringify(publicKey), 
+            privateKey: JSON.stringify(privateKey) 
+          }),
+        });
 
+        const data = await res.json();
+        if (!res.ok) throw new Error(data);
+
+        localStorage.setItem(`priv_${data.username}`, JSON.stringify(privateKey));
+        localStorage.setItem("my_friend_code", data.friendCode);
         onLogin(data.username);
+
       } else {
-        setError(data);
+        const res = await fetch(`${SERVER_URL}/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data);
+
+        if (!localStorage.getItem(`priv_${data.username}`)) {
+            alert("Warning: New device detected. Old secure messages won't be readable.");
+            if(data.privateKey) {
+                 localStorage.setItem(`priv_${data.username}`, data.privateKey);
+            }
+        }
+        
+        localStorage.setItem("my_friend_code", data.friendCode);
+        onLogin(data.username);
       }
     } catch (err) {
-      setError("Server error.");
+      console.error(err);
+      setError(err.message || "Server Error");
+    } finally {
+      setLoading(false);
     }
   };
+
   return (
     <div className="login-container">
       <div className="login-card">
-        <h2>{isRegister ? "Create Account" : "Welcome Back"}</h2>
+        <h1 className="logo-text large" style={{fontSize: "3rem", marginBottom: "0"}}>MSG</h1>
+        <h3>{isRegistering ? "Secure Registration" : "Welcome Back"}</h3>
         {error && <div className="error-msg">{error}</div>}
-        
         <form onSubmit={handleSubmit}>
-          <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button type="submit">
-            {isRegister ? "Sign Up & Generate Keys" : "Log In"}
-          </button>
+          <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <button type="submit" disabled={loading}>{loading ? "Processing..." : (isRegistering ? "Create ID" : "Login")}</button>
         </form>
-
-        <p onClick={() => setIsRegister(!isRegister)} className="toggle-btn">
-          {isRegister
-            ? "Already have an account? Login"
-            : "Don't have an account? Sign Up"}
-        </p>
+        <div className="toggle-btn" onClick={() => setIsRegistering(!isRegistering)}>
+          {isRegistering ? "Already have an ID? Login" : "Need a Secure ID? Register"}
+        </div>
       </div>
     </div>
   );
