@@ -198,15 +198,28 @@ body {
 .call-btn.accept { background: var(--success-color); }
 .call-btn.reject { background: var(--error-color); }
 
-/* --- 📱 MOBILE RESPONSIVENESS FIXES --- */
+/* --- 📱 MOBILE RESPONSIVENESS FIXES (UPDATED) --- */
 @media screen and (max-width: 768px) {
   .app-container {
     flex-direction: column;
-    position: fixed; /* Prevents scroll bounce on mobile */
+    position: fixed; 
     top: 0; left: 0; width: 100%; height: 100%;
   }
 
-  /* When on mobile, toggle between sidebar and chat */
+  /* SIDEBAR FIXED ALIGNMENT */
+  .sidebar-header {
+    height: 60px;
+    padding: 0 15px;
+    display: flex;
+    align-items: center; /* Fixes vertical alignment */
+  }
+
+  .mini-profile {
+    display: flex;
+    align-items: center;
+    position: relative; /* Keeps status dot attached to HF icon */
+  }
+
   .sidebar {
     width: 100%;
     height: 100%;
@@ -221,36 +234,53 @@ body {
     width: 100%;
     height: 100%;
     position: absolute;
-    z-index: 10;
-    left: 100%; /* Initially hidden off-screen to the right */
+    z-index: 11;
+    left: 100%; 
     top: 0;
     transition: left 0.3s ease-in-out;
+    display: flex; /* Ensure it can show the no-chat screen */
   }
 
-  /* State classes to control visibility via JS toggling */
-  .sidebar.mobile-hidden {
-    transform: translateX(-100%); /* Slide sidebar away */
+  /* NEW RULE: Show chat area if NO user is selected so User ID is visible */
+  .chat-area:not(.mobile-visible) {
+    left: 0;
+    z-index: 5; /* Lower than sidebar user list but visible behind it if needed */
+    background: var(--bg-gradient);
   }
 
+  /* When sidebar is active, hide the empty chat area behind it */
+  .sidebar:not(.mobile-hidden) {
+    z-index: 12;
+  }
+
+  /* When a user is selected, slide the chat area to the front */
   .chat-area.mobile-visible {
-    left: 0; /* Slide chat in */
+    left: 0;
+    z-index: 20;
   }
 
-  /* Adjust spacing for touch targets */
-  .sidebar-header, .chat-header { height: 60px; padding: 0 15px; }
+  .sidebar.mobile-hidden {
+    transform: translateX(-100%);
+  }
+
+  /* Ensure the ID pill is clickable and visible */
+  .no-chat {
+    padding: 20px;
+    justify-content: flex-start; /* Move up slightly for small screens */
+    padding-top: 40px;
+  }
+
+  .welcome-id-pill {
+    font-size: 1rem;
+    padding: 12px 20px;
+    width: 90%;
+    justify-content: center;
+  }
+
+  /* General mobile tweaks */
+  .chat-header { height: 60px; padding: 0 15px; }
   .logout-area { height: 70px; }
-  .chat-input-area { padding: 10px; }
-  .user-card { padding: 12px 15px; }
-  
-  /* Message bubbles max width adjustment */
   .message-wrapper { max-width: 85%; }
-  
-  /* Video Call on Mobile */
-  .call-box { width: 100%; height: 100%; border-radius: 0; }
-  .my-video { width: 100px; bottom: 100px; right: 15px; }
-  .call-controls { bottom: 20px; width: 100%; justify-content: center; }
-  
-  /* Security Grid Stacking */
   .security-grid { flex-direction: column; align-items: center; }
   .security-card { width: 100%; }
 }
