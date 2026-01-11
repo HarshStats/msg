@@ -15,19 +15,17 @@ import "./App.css";
 // 🚀 LIVE SERVER URL (Render)
 const SERVER_URL = "https://msg-p0th.onrender.com"; 
 
-// 🔊 SOUNDS (Updated to stable Google/Edu links)
-// Old Mixkit links expired. These are reliable:
+// 🔊 SOUNDS
 const NOTIFICATION_SOUND = "https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3";
 const RINGTONE_SOUND = "https://codeskulptor-demos.commondatastorage.googleapis.com/Galaxy/music/theme_01.mp3"; 
 
-// ROBUS AUDIO PLAYER
+// ROBUST AUDIO PLAYER
 const playSound = async (url, loop = false) => {
   const audio = new Audio(url);
   if(loop) audio.loop = true;
   audio.volume = 0.5;
   
   try {
-    // Browsers require user interaction before playing audio
     await audio.play();
   } catch (e) {
     console.warn("Audio blocked by browser policy until user interaction.");
@@ -95,6 +93,7 @@ const ChatInterface = ({ myId, onLogout }) => {
   const [viewingImage, setViewingImage] = useState(null);
   const [nukeCount, setNukeCount] = useState(0); 
   const [theme, setTheme] = useState("dark");
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768); // Mobile detection state
 
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendCodeInput, setFriendCodeInput] = useState("");
@@ -129,6 +128,13 @@ const ChatInterface = ({ myId, onLogout }) => {
       const text = theme === 'dark' ? '00bcd4' : '006064';
       return `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=${bg}&textColor=${text}&fontWeight=700`;
   };
+
+  // Handle Resize for Mobile View
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // --- 1. SETUP SOCKET ---
   useEffect(() => {
@@ -166,7 +172,6 @@ const ChatInterface = ({ myId, onLogout }) => {
 
     newSocket.on("getMessage", (message) => {
       setMessages((prev) => [...prev, message]);
-      // ONLY PLAY SOUND IF MESSAGE IS FROM SOMEONE ELSE
       if (message.senderId !== myId) {
           playSound(NOTIFICATION_SOUND); 
       }
@@ -307,7 +312,7 @@ const ChatInterface = ({ myId, onLogout }) => {
     fetchMsgs();
   }, [myId]);
 
-  // --- 🔥 PUBLIC KEY PARSING FIX ---
+  // --- 🔥 DECRYPTION LOGIC 🔥 ---
   const getSharedKey = async (otherUser) => {
       if (!otherUser) return null;
       if (sharedKeysCache.current[otherUser.username]) return sharedKeysCache.current[otherUser.username];
@@ -423,7 +428,7 @@ const ChatInterface = ({ myId, onLogout }) => {
       setIsSelectionMode(false); 
   };
 
-  // --- 🔥 DECRYPTION LOGIC 🔥 ---
+  // --- 🔥 DECRYPTION LOOP 🔥 ---
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
@@ -463,7 +468,8 @@ const ChatInterface = ({ myId, onLogout }) => {
   return (
     <div className={`app-container ${theme === "light" ? "light-theme" : ""}`}>
       {/* SIDEBAR */}
-      <div className={`sidebar ${selectedUser ? "mobile-hidden" : ""}`}>
+      {/* Updated Logic: Hide sidebar if on mobile AND a user is selected */}
+      <div className={`sidebar ${isMobile && selectedUser ? "mobile-hidden" : ""}`}>
         <div className="sidebar-header">
           <div className="brand-container" onClick={toggleTheme} style={{cursor: "pointer"}} title="Toggle Theme">
             <h1 className="logo-text">MSG</h1>
@@ -503,7 +509,8 @@ const ChatInterface = ({ myId, onLogout }) => {
       </div>
 
       {/* CHAT AREA */}
-      <div className={`chat-area ${!selectedUser ? "mobile-hidden" : ""}`}>
+      {/* Updated Logic: Only show chat if selectedUser is present (on mobile, slide it in) */}
+      <div className={`chat-area ${selectedUser ? "mobile-visible" : ""}`}>
         {selectedUser ? (
           <>
             <div className={`chat-header ${isSelectionMode ? "selection-mode" : ""}`}>
@@ -515,7 +522,10 @@ const ChatInterface = ({ myId, onLogout }) => {
               ) : (
                   <>
                     <div className="header-left">
-                        <FiArrowLeft className="back-btn icon-btn" onClick={() => setSelectedUser(null)} style={{marginRight: "15px"}}/>
+                        {/* Always show back button on mobile when chat is active */}
+                        {(isMobile || selectedUser) && (
+                            <FiArrowLeft className="back-btn icon-btn" onClick={() => setSelectedUser(null)} style={{marginRight: "10px", display: isMobile ? 'flex' : 'none'}}/>
+                        )}
                         <div className="avatar small"><img src={getAvatar(selectedUser.username)} alt="avatar" /></div>
                         <div className="header-info"><h3>{selectedUser.username}</h3><div style={{display:"flex", alignItems:"center", gap:"5px", fontSize: "11px", color: "#00bcd4"}}><FiShield size={10} /> <span>End-to-End Encrypted</span></div></div>
                     </div>
