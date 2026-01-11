@@ -399,28 +399,37 @@ const ChatInterface = ({ myId, onLogout }) => {
       setIsSelectionMode(false); 
   };
 
+  // --- 🔥 FIXED DECRYPTION LOOP 🔥 ---
+  // This useEffect now watches 'contacts' and retries decryption when they load.
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
+          let updated = false;
+
           for (let msg of currentChatMessages) {
               const keyId = msg._id || msg.time;
+              // Only try to decrypt if we haven't successfully decrypted it yet
               if (!newCache[keyId]) { 
                   const otherUsername = msg.senderId === myId ? msg.recipientId : msg.senderId;
                   const contact = contacts.find(c => c.username === otherUsername);
+                  
                   if (contact) {
                       const key = await getSharedKey(contact);
                       if (key) {
                           const text = await decryptText(key, msg.text);
                           newCache[keyId] = text; 
-                          if(msg._id) newCache[msg._id] = text; 
+                          if(msg._id) newCache[msg._id] = text;
+                          updated = true;
                       }
                   }
               }
           }
-          setDecryptedCache(newCache);
+          if (updated) setDecryptedCache(newCache);
       };
+      
+      // Runs whenever messages change, user changes, OR CONTACTS load.
       if (messages.length > 0 && selectedUser) processMessages();
-  }, [messages, selectedUser]); 
+  }, [messages, selectedUser, contacts]); 
 
   const filteredContacts = contacts.filter(u => u.username.toLowerCase().includes(searchTerm.toLowerCase()));
   const currentChatMessages = messages.filter(msg => 
