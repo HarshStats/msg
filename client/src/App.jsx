@@ -15,15 +15,23 @@ import "./App.css";
 // 🚀 LIVE SERVER URL (Render)
 const SERVER_URL = "https://msg-p0th.onrender.com"; 
 
-// SOUNDS
-const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2346/2346-preview.mp3";
-const RINGTONE_SOUND = "https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3"; 
+// 🔊 SOUNDS (Updated to stable Google/Edu links)
+// Old Mixkit links expired. These are reliable:
+const NOTIFICATION_SOUND = "https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3";
+const RINGTONE_SOUND = "https://codeskulptor-demos.commondatastorage.googleapis.com/Galaxy/music/theme_01.mp3"; 
 
-const playSound = (url, loop = false) => {
+// ROBUS AUDIO PLAYER
+const playSound = async (url, loop = false) => {
   const audio = new Audio(url);
   if(loop) audio.loop = true;
   audio.volume = 0.5;
-  audio.play().catch(e => console.error("Audio blocked", e));
+  
+  try {
+    // Browsers require user interaction before playing audio
+    await audio.play();
+  } catch (e) {
+    console.warn("Audio blocked by browser policy until user interaction.");
+  }
   return audio;
 };
 
@@ -139,7 +147,7 @@ const ChatInterface = ({ myId, onLogout }) => {
         setReceivingCall(true);
         setCaller(data.from);
         setCallerSignal(data.signal);
-        try { ringtoneRef.current = playSound(RINGTONE_SOUND, true); } catch(e) {}
+        playSound(RINGTONE_SOUND, true).then(audio => ringtoneRef.current = audio);
     });
 
     newSocket.on("callAccepted", (signal) => {
@@ -158,7 +166,10 @@ const ChatInterface = ({ myId, onLogout }) => {
 
     newSocket.on("getMessage", (message) => {
       setMessages((prev) => [...prev, message]);
-      if (message.senderId !== myId) playSound(NOTIFICATION_SOUND); 
+      // ONLY PLAY SOUND IF MESSAGE IS FROM SOMEONE ELSE
+      if (message.senderId !== myId) {
+          playSound(NOTIFICATION_SOUND); 
+      }
       if (selectedUserRef.current?.username !== message.senderId) setNotifications((prev) => [message, ...prev]);
     });
 
@@ -296,15 +307,13 @@ const ChatInterface = ({ myId, onLogout }) => {
     fetchMsgs();
   }, [myId]);
 
-  // --- 🔥 THE FIX: CORRECTLY PARSE PUBLIC KEY 🔥 ---
+  // --- 🔥 PUBLIC KEY PARSING FIX ---
   const getSharedKey = async (otherUser) => {
       if (!otherUser) return null;
       if (sharedKeysCache.current[otherUser.username]) return sharedKeysCache.current[otherUser.username];
       
-      // Get MY Private Key (Object)
       const myPrivKeyJwk = JSON.parse(localStorage.getItem(`priv_${myId}`));
       
-      // Get THEIR Public Key (Handle String or Object)
       let otherPublicKey = otherUser.publicKey;
       if (typeof otherPublicKey === "string") {
           try {
@@ -414,7 +423,7 @@ const ChatInterface = ({ myId, onLogout }) => {
       setIsSelectionMode(false); 
   };
 
-  // --- 🔥 FIXED DECRYPTION LOOP 🔥 ---
+  // --- 🔥 DECRYPTION LOGIC 🔥 ---
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
