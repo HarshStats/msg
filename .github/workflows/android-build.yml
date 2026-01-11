@@ -34,8 +34,12 @@ jobs:
       - name: Build Android APK
         working-directory: ./client/android
         run: |
+          # Fix Windows line endings for the gradlew script
+          sed -i 's/\r$//' gradlew
+          # Make it executable
           chmod +x gradlew
-          ./gradlew assembleDebug
+          # Run build using the specified Java Home
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
