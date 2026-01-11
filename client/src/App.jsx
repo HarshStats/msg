@@ -5,7 +5,7 @@ import {
   FiSearch, FiPaperclip, FiSend, FiMoreVertical, 
   FiArrowLeft, FiUserPlus, FiCopy,
   FiTrash2, FiCornerUpRight, FiX, FiShield, FiImage, FiDownload, FiAlertTriangle,
-  FiPhone, FiVideo, FiMic, FiMicOff, FiVideoOff 
+  FiVideo, FiMic, FiMicOff, FiVideoOff, FiPhone 
 } from "react-icons/fi"; 
 import { BsCheck2All, BsBookmarkStarFill, BsCircle, BsCheckCircleFill, BsTelephoneFill, BsTelephoneXFill } from "react-icons/bs"; 
 import Login from "./Login"; 
