@@ -124,7 +124,6 @@ const ChatInterface = ({ myId, onLogout }) => {
 
   // --- 1. SETUP SOCKET ---
   useEffect(() => {
-    // Connect to Render Backend
     const newSocket = io(SERVER_URL, { transports: ['websocket'] });
     setSocket(newSocket);
 
@@ -276,7 +275,7 @@ const ChatInterface = ({ myId, onLogout }) => {
       }
   }
 
-  // --- 3. FETCH LOGIC (Uses SERVER_URL) ---
+  // --- 3. FETCH LOGIC ---
   const fetchContacts = async () => {
       try {
         const res = await fetch(`${SERVER_URL}/contacts/${myId}`);
@@ -297,12 +296,28 @@ const ChatInterface = ({ myId, onLogout }) => {
     fetchMsgs();
   }, [myId]);
 
+  // --- 🔥 THE FIX: CORRECTLY PARSE PUBLIC KEY 🔥 ---
   const getSharedKey = async (otherUser) => {
       if (!otherUser) return null;
       if (sharedKeysCache.current[otherUser.username]) return sharedKeysCache.current[otherUser.username];
+      
+      // Get MY Private Key (Object)
       const myPrivKeyJwk = JSON.parse(localStorage.getItem(`priv_${myId}`));
-      if (!myPrivKeyJwk || !otherUser.publicKey) return null;
-      const key = await deriveSharedKey(myPrivKeyJwk, otherUser.publicKey);
+      
+      // Get THEIR Public Key (Handle String or Object)
+      let otherPublicKey = otherUser.publicKey;
+      if (typeof otherPublicKey === "string") {
+          try {
+              otherPublicKey = JSON.parse(otherPublicKey);
+          } catch(e) {
+              console.error("Failed to parse public key", e);
+              return null;
+          }
+      }
+
+      if (!myPrivKeyJwk || !otherPublicKey) return null;
+      
+      const key = await deriveSharedKey(myPrivKeyJwk, otherPublicKey);
       sharedKeysCache.current[otherUser.username] = key;
       return key;
   };
@@ -400,7 +415,6 @@ const ChatInterface = ({ myId, onLogout }) => {
   };
 
   // --- 🔥 FIXED DECRYPTION LOOP 🔥 ---
-  // This useEffect now watches 'contacts' and retries decryption when they load.
   useEffect(() => {
       const processMessages = async () => {
           const newCache = { ...decryptedCache };
@@ -408,7 +422,6 @@ const ChatInterface = ({ myId, onLogout }) => {
 
           for (let msg of currentChatMessages) {
               const keyId = msg._id || msg.time;
-              // Only try to decrypt if we haven't successfully decrypted it yet
               if (!newCache[keyId]) { 
                   const otherUsername = msg.senderId === myId ? msg.recipientId : msg.senderId;
                   const contact = contacts.find(c => c.username === otherUsername);
@@ -427,7 +440,6 @@ const ChatInterface = ({ myId, onLogout }) => {
           if (updated) setDecryptedCache(newCache);
       };
       
-      // Runs whenever messages change, user changes, OR CONTACTS load.
       if (messages.length > 0 && selectedUser) processMessages();
   }, [messages, selectedUser, contacts]); 
 
