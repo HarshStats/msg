@@ -39,9 +39,7 @@ body {
     margin: 0; font-family: 'Inter', 'Segoe UI', sans-serif; 
     background: var(--bg-gradient); 
     color: var(--text-primary); 
-    height: 100vh; overflow: hidden;
-    padding-top: env(safe-area-inset-top); /* Dynamic Notch Support */
-    padding-bottom: env(safe-area-inset-bottom); /* iOS Home Bar Support */ 
+    height: 100vh; overflow: hidden; 
 }
 
 /* --- SCROLLBAR STYLING --- */
