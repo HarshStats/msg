@@ -29,7 +29,7 @@
 | **🏠 Website** | Landing Page & Features | [**Visit Site**](https://msg-hmc3.vercel.app/) |
 | **🌐 Web Portal** | `Live` | [**Launch Web App**](https://msg-amber.vercel.app/) |
 | **🤖 Android** | `v2.0.0` | [**Download APK**](https://github.com/HarshStats/msg/releases/latest) |
-| **📄 Whitepaper** | `Technical` | [**View Documentation**](./MSG__Technical_Documentation.pdf) |
+| **📄 Whitepaper** | `Technical` | [**View Documentation**](https://github.com/HarshStats/msg/blob/main/docs/MSG__Technical_Documentation.pdf) |
 
 ---
 
@@ -74,11 +74,14 @@ Want to run your own private MSG node? Follow these steps.
 
 ### Clone the Repo
 ```bash
+
 git clone [https://github.com/HarshStats/msg.git](https://github.com/HarshStats/msg.git)
 cd msg
 
+```
+---
 
-### Clone the Repo
+## 🤝 Contributing
 
 I welcome security audits and feature contributions.
 
