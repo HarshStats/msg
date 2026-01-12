@@ -1,7 +1,10 @@
 # MSG: The Messenger That Forgets.
 
 <div align="center">
-  <img src="https://github.com/HarshStats/msg/docs/banner.png" alt="MSG Protocol Banner" width="100%" />
+  <a href="https://msg-hmc3.vercel.app">
+    <img src="https://github.com/HarshStats/msg/blob/main/docs/banner.png" alt="Banner for MSG Protocol featuring a dark minimalistic background with a neon teal shield icon in the center symbolizing security. The text MSG: The Messenger That Forgets is displayed prominently in bold white font. Below the title, smaller text reads Zero Metadata, End-to-End Encrypted, Identity-Agnostic. The overall tone is sleek, modern, and privacy-focused." width="100%" />
+  </a>
+
 </div>
 
 <br />
