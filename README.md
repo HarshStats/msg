@@ -8,13 +8,10 @@
 
 <div align="center">
 
-  # MSG: The Messenger That Forgets.
 
   ![Version](https://img.shields.io/github/v/release/HarshStats/msg?style=for-the-badge&color=00bcd4)
   ![License](https://img.shields.io/github/license/HarshStats/msg?style=for-the-badge&color=00e676)
   ![Status](https://img.shields.io/badge/Status-Mainnet_Live-success?style=for-the-badge)
-
-  **The world's first truly anonymous, zero-knowledge messaging layer.** *No phone numbers. No emails. No metadata. Just mathematics.*
 
   [**Launch App**](https://msg-amber.vercel.app/) • [**Read Whitepaper**](./MSG__Technical_Documentation.pdf) • [**Report Bug**](https://github.com/HarshStats/msg/issues)
 
@@ -26,6 +23,7 @@
 
 | **Platform** | **Status** | **Action** |
 | :--- | :--- | :--- |
+| **🏠 Website** | Landing Page & Features | [**Visit Site**](https://msg-hmc3.vercel.app/) |
 | **🌐 Web Portal** | `Live` | [**Launch Web App**](https://msg-amber.vercel.app/) |
 | **🤖 Android** | `v2.0.0` | [**Download APK**](https://github.com/HarshStats/msg/releases/latest) |
 | **📄 Whitepaper** | `Technical` | [**View Documentation**](./MSG__Technical_Documentation.pdf) |
@@ -71,12 +69,14 @@ Want to run your own private MSG node? Follow these steps.
 * Node.js v16+
 * MongoDB (Local or Atlas)
 
-### 1. Clone the Repo
+### Clone the Repo
 ```bash
 git clone [https://github.com/HarshStats/msg.git](https://github.com/HarshStats/msg.git)
 cd msg
 
-## 🤝 Contributing
+---
+
+### 🤝 Contributing
 
 We welcome security audits and feature contributions.
 
