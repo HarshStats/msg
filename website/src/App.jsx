@@ -51,7 +51,7 @@ function App() {
             <a href="#features" className="nav-link">Architecture</a>
             <a href="#comparison" className="nav-link">Security</a>
             <a href="#network" className="nav-link">Network</a>
-            <a href="https://github.com/HarshStats/msg" className="nav-link"><FiGithub /> Source</a>
+            <a href="https://github.com/HarshStats/msg" target="_blank" rel="noopener noreferrer" className="nav-link"><FiGithub /> Source</a>
           </div>
 
           {/* FIX 2: Relative link (Works on deployment) */}
