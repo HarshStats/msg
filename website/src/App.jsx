@@ -55,7 +55,7 @@ function App() {
           </div>
 
           {/* FIX 2: Relative link (Works on deployment) */}
-          <a href="#network" className="nav-btn">Launch App</a>
+          <a href="#network" className="nav-btn">Get App</a>
         </div>
       </nav>
       {/* HERO SECTION */}
@@ -73,7 +73,6 @@ The world's first zero-knowledge messaging layer. Ephemeral by design. Anonymous
           </motion.p>
           <motion.div variants={fadeInUp} className="hero-btns">
             <a href="#network" className="btn-primary">Start Encrypted Chat</a>
-            <a href="#features" className="btn-secondary">Read Whitepaper</a>
           </motion.div>
         </motion.div>
       </section>
@@ -345,22 +344,16 @@ The world's first zero-knowledge messaging layer. Ephemeral by design. Anonymous
             </div>
             <div className="footer-col">
               <h4>Product</h4>
-              <a href="#">Web Client</a>
-              <a href="#">Android App</a>
-              <a href="#">Release Notes</a>
+              <a href="https://msg-amber.vercel.app#" target="_blank" rel="noopener noreferrer">Web App</a>
+              <a href="https://github.com/HarshStats/msg/releases/download/v2.0.0/v2.0.0-msg.apk" target="_blank" rel="noopener noreferrer">Android App</a>
+              <a href="https://github.com/HarshStats/msg/releases/tag/v2.0.0" target="_blank" rel="noopener noreferrer">Release Notes</a>
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="#">Whitepaper</a>
-              <a href="#">Security Audit</a>
-              <a href="#">GitHub Repo</a>
+              <a href="https://github.com/HarshStats/msg/blob/main/docs/MSG__Technical_Documentation.pdf" target="_blank" rel="noopener noreferrer">Whitepaper</a>
+              <a href="https://github.com/HarshStats/msg" target="_blank" rel="noopener noreferrer">GitHub Repo</a>
             </div>
-            <div className="footer-col">
-              <h4>Legal</h4>
-              <a href="#">Privacy Policy</a>
-              <a href="#">Terms of Service</a>
-              <a href="#">Canary</a>
-            </div>
+            
           </div>
           <div className="footer-bottom">
             <span>© {new Date().getFullYear()} MSG. Open Source MIT License.</span>
