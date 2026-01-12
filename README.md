@@ -83,7 +83,7 @@ cd msg
 
 ## 🤝 Contributing
 
-I welcome security audits and feature contributions.
+I welcome feature contributions.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
