@@ -37,13 +37,13 @@
 
 **MSG** is an open-source communication protocol built on a **"Blind Relay" architecture**. Unlike Signal or Telegram, which still require phone numbers and store user metadata, MSG is **identity-agnostic**.
 
-We do not know who you are. We do not know who you are talking to. We cannot read your messages even if we wanted to.
+I do not know who you are. I do not know who you are talking to. I cannot read your messages even if I wanted to.
 
 ### 🔥 Key Features
-* **👻 Zero Metadata:** We log nothing. No IPs, no timestamps, no sender IDs.
+* **👻 Zero Metadata:** I log nothing. No IPs, no timestamps, no sender IDs.
 * **🛡️ End-to-End Encrypted:** AES-256-GCM + ECDH P-256 key exchange happens locally.
 * **☢️ The Nuke Protocol:** One-click panic button that wipes data from **both** devices instantly.
-* **📹 P2P Video:** WebRTC streams bypass our servers entirely (Direct Mesh).
+* **📹 P2P Video:** WebRTC streams bypass my servers entirely (Direct Mesh).
 * **🧬 Biometric Lock:** (Android) Optional FaceID/Fingerprint lock for the app.
 * **🕸️ Tor Ready:** Lightweight web client works seamlessly in Tor Browser.
 
@@ -77,11 +77,10 @@ Want to run your own private MSG node? Follow these steps.
 git clone [https://github.com/HarshStats/msg.git](https://github.com/HarshStats/msg.git)
 cd msg
 
----
 
-### 🤝 Contributing
+### Clone the Repo
 
-We welcome security audits and feature contributions.
+I welcome security audits and feature contributions.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
